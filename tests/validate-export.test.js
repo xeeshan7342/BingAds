@@ -178,20 +178,47 @@ test('export: the bulk file starts with the format version and puts parents befo
   assert.deepEqual(rows.filter(r => r.Type === 'Keyword').map(r => r['Match Type']), ['Phrase', 'Phrase']);
 });
 
-test('export: responsive search ad headlines and descriptions are JSON text assets', () => {
+test('export: responsive search ads use one column per headline and description, as Editor\'s file import reads them', () => {
   const m = doc();
   m.adGroups[0].descriptions[0] = 'Fast, friendly "IT" help for small businesses across the whole region.';
   const t = E.exportRows(m, settings());
   const ad = records(t).find(r => r.Type === 'Responsive Search Ad');
-  assert.deepEqual(JSON.parse(ad.Headline), [{ text: 'IT Support Experts' }, { text: 'Fast IT Help' }, { text: 'Managed IT Services' }]);
-  assert.equal(JSON.parse(ad.Description)[0].text, 'Fast, friendly "IT" help for small businesses across the whole region.');
+  assert.deepEqual([ad['Headline 1'], ad['Headline 2'], ad['Headline 3']], ['IT Support Experts', 'Fast IT Help', 'Managed IT Services']);
+  assert.equal(ad['Description 1'], 'Fast, friendly "IT" help for small businesses across the whole region.');
+  assert.equal(ad['Description 2'], 'Talk to a specialist about a managed IT plan for your business.');
+  // only the columns some row fills: 3 headlines and 2 descriptions here
+  assert.ok(!t.headers.includes('Headline 4') && !t.headers.includes('Description 3'));
+  assert.ok(!t.headers.includes('Headline') && !t.headers.includes('Description'));
   assert.equal(ad['Final Url'], 'https://www.example.com/');
   assert.equal(ad['Path 1'], 'IT-Support');
   const csv = E.toCSV(t);
-  // CSV doubles the quotes inside the JSON, as Microsoft's bulk examples show
-  assert.ok(csv.includes('"[{""text"":""Fast, friendly \\""IT\\"" help'));
-  assert.ok(csv.includes('"[{""text"":""IT Support Experts""},{""text"":""Fast IT Help""},{""text"":""Managed IT Services""}]"'));
+  assert.ok(csv.includes(',"Fast, friendly ""IT"" help for small businesses across the whole region.",'));
+  assert.ok(!csv.includes('"text"') && !csv.includes('pinnedField'));
   assert.ok(csv.endsWith('\r\n'));
+});
+
+test('export: an ad with 15 headlines and 4 descriptions fills Headline 1-15 and Description 1-4, with no JSON', () => {
+  const hs = Array.from({ length: 15 }, (x, i) => 'Headline Number ' + (i + 1));
+  const ds = Array.from({ length: 4 }, (x, i) => 'Description number ' + (i + 1) + ' for the test ad, long enough to read.');
+  const m = parseText(['Campaign 1: Test Campaign', 'Daily budget: 25', 'Ad Group 1: Test Group', 'Keywords', '- test keyword',
+    'Headlines'].concat(hs.map(h => '- ' + h), ['Descriptions'], ds.map(d => '- ' + d)).join('\n'));
+  m.adGroups[0].pins = { [E.pinKey('h', hs[0])]: 1, [E.pinKey('d', ds[1])]: 2 };
+  assert.equal(m.campaigns.length, 1);
+  assert.equal(m.adGroups.length, 1);
+  assert.deepEqual(E.validate(m, settings(), TODAY).errors, []);
+  const t = E.exportRows(m, settings());
+  const ads = records(t).filter(r => r.Type === 'Responsive Search Ad');
+  assert.equal(ads.length, 1);
+  const ad = ads[0];
+  hs.forEach((h, i) => assert.equal(ad['Headline ' + (i + 1)], h));
+  ds.forEach((d, i) => assert.equal(ad['Description ' + (i + 1)], d));
+  const cols = t.headers.filter(h => /^(?:Headline|Description)\b/.test(h));
+  assert.deepEqual(cols, hs.map((h, i) => 'Headline ' + (i + 1)).concat(ds.map((d, i) => 'Description ' + (i + 1))));
+  t.rows.forEach(r => r.forEach(c => assert.ok(!/^\s*[[{]/.test(c), 'no JSON in any cell: ' + c)));
+  assert.ok(!t.headers.some(h => /pin/i.test(h)), 'Editor\'s file import has no pin columns');
+  // the pins are listed to set by hand instead
+  assert.deepEqual(E.pinList(m), [{ campaign: 'Test Campaign', adGroup: 'Test Group', pins: [
+    { type: 'h', text: hs[0], position: 1, slot: 'Headline 1' }, { type: 'd', text: ds[1], position: 2, slot: 'Description 2' }] }]);
 });
 
 test('export: campaign negatives, per-campaign locations, Enhanced CPC bids, broad match, negatives as Phrase', () => {

@@ -302,5 +302,6 @@ details.panel:not([open]) { gap: 0; }
 .chip.need { background: var(--warn-soft); }
 .missing-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
 .missing-list b { display: block; font-weight: 600; }
-.missing-list span { color: var(--ink-2); overflow-wrap: anywhere; }
+.missing-list span { display: block; color: var(--ink-2); overflow-wrap: anywhere; }
+.missing-list.scroll { max-height: 340px; overflow-y: auto; padding-right: 4px; }
 .chip.ex { background: var(--err-soft); }

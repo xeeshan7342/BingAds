@@ -20,7 +20,7 @@ Word (.docx), Excel (.xlsx, every visible tab), CSV and TSV, text and Markdown. 
 
 The reader is the same one the Google Ads tool uses, so the same layouts work: ad groups as headings, table rows, table columns or spreadsheet tabs; campaigns from a campaign table or headings; keywords as lists, tables or Keyword Planner pastes; headlines and descriptions as lists, tables, numbered lines or one mixed "Ad copy" list; negatives at account, campaign or ad group level; and settings such as final URL, budgets in any currency, locations, languages, bidding, match type, search partners and start date.
 
-Planning workbooks work as they are. A tab can hold a title, a line of instructions and several tables one under another, with notes between them and an empty first column; each table is read on its own and the notes go to the import report. Dashboard, checklist and asset tabs are skipped, and dashboard figures such as "CAMPAIGNS 2 | KEYWORDS 190" never become campaigns. A Structure tab gives each ad group its final URL and paths, and count columns such as "Phrase | Exact | Total" are not read as keywords. When an Ads tab writes one ad per ad group with no campaign column ("used in both campaigns"), every campaign's ad group of that name gets the ad, and the tool says so.
+Planning workbooks work as they are. A tab can hold a title, a line of instructions and several tables one under another, with notes between them and an empty first column; each table is read on its own and the notes go to the import report. Dashboard, checklist and asset tabs are skipped, and dashboard figures such as "CAMPAIGNS 2" or "KEYWORDS 190" never become campaigns. A Structure tab gives each ad group its final URL and paths, and count columns such as Phrase, Exact and Total are not read as keywords. When an Ads tab writes one ad per ad group with no campaign column ("used in both campaigns"), every campaign's ad group of that name gets the ad, and the tool says so.
 
 Microsoft and Bing sections are this tool's platform. Google Ads sections are read too, because most docs are written for Google first and the same campaigns run on both. When a doc has its own Microsoft Ads or Bing section with ad groups or keywords in it, that section is used and the Google Ads version is skipped. Sections for Meta, LinkedIn, TikTok and other platforms, and for Display, Shopping, Performance Max and audience campaigns, are skipped as one unit.
 
@@ -28,7 +28,7 @@ Microsoft and Bing sections are this tool's platform. Google Ads sections are re
 
 | Area | What the tool does for Microsoft Advertising |
 |---|---|
-| File | A bulk file in Microsoft's format version 6.0: a `Format Version` row, then campaigns, location targets, negatives, ad groups, keywords and responsive search ads, each parent before its children |
+| File | A bulk file in Microsoft's format version 6.0: a `Format Version` row, then campaigns, location targets, negatives, ad groups, keywords and responsive search ads, each parent before its children. Ads use one column per line, `Headline 1` to `Headline 15` and `Description 1` to `Description 4` |
 | Time zone | Required on every new campaign. The tool picks one when every location shares a zone (Texas, Dubai, the UK), or else from a budget currency used in one country (INR, AED, GBP), and says which it used; otherwise it asks |
 | Bidding | Maximize clicks, Maximize conversions, Target CPA and Enhanced CPC. Microsoft Search campaigns have no manual CPC, so a doc that asks for it gets Enhanced CPC with its bids as the starting point. A CPC cap in the doc becomes the Max CPC limit |
 | Languages | Microsoft's ad languages only (English, French, German, Spanish, Portuguese, Italian, Dutch, the Nordic and EU languages, and Traditional Chinese). Others, such as Arabic or Hindi, are left out with a note; with none left the campaign targets all languages |
@@ -37,7 +37,7 @@ Microsoft and Bing sections are this tool's platform. Google Ads sections are re
 | Search partners | Off writes `OwnedAndOperatedOnly` on each ad group; on writes `OwnedAndOperatedAndSyndicatedSearch` |
 | Start date | Set on each ad group. A date in the past is a warning, since Microsoft starts the ad groups that day instead |
 | Display URL | Paths are 15 characters each, and the domain plus both paths must fit in 67 |
-| Pins | Pinned headlines and descriptions go into the file as Microsoft pins (`"pinnedField": "Headline1"`), from a Pin column or a note such as "(Pin 1)". Each line has a pin picker, and the preview shows the pinned line in its place |
+| Pins | Read from a Pin column or a note such as "(Pin 1)", and set with each line's pin picker. Editor's file import has no pin columns, so pins are not in the file: the export panel lists them per ad group under **Pin these in Editor** to set after import. One line per position: when two lines are pinned to the same position, the first keeps it and the rest are unpinned with a warning |
 | Excluded places | An "Excluded locations" setting, or "excluding ..." in a locations line, becomes excluded location rows once the places have IDs |
 | Final URL suffix | Read from the doc or typed in, and written on each campaign |
 | Ad rotation | "Optimize for clicks" or "Rotate evenly", written on each ad group |
@@ -70,7 +70,7 @@ For docs the rules can't follow, open **AI reading**. Either copy a prompt into 
 
 Export is blocked until errors are fixed. Errors cover Microsoft's hard limits: headline 30 and description 90 characters, 3 to 15 headlines and 2 to 4 descriptions, duplicate headlines, emoji, repeated punctuation, symbols in keywords, keyword length, display path rules, campaign and ad group name length, missing budgets, final URLs, time zone, target CPA or Enhanced CPC bid, pins that leave a position with nothing to show, a final URL suffix that starts with ? or uses {lpurl}, and a campaign that would serve everywhere while enabled.
 
-Warnings don't block export: places without a location ID (targeted or excluded), broad negatives going in as Phrase, negatives that block your own keywords, the same keyword in two ad groups of one campaign or of campaigns that reach the same places, exclamation marks in headlines, phone numbers or capitalised words in ad text, budgets the doc gave without saying daily or monthly, and start dates in the past.
+Warnings don't block export: places without a location ID (targeted or excluded), broad negatives going in as Phrase, negatives that block your own keywords, the same keyword in two ad groups of one campaign or of campaigns that reach the same places, two lines pinned to the same position, exclamation marks in headlines, phone numbers or capitalised words in ad text, budgets the doc gave without saying daily or monthly, and start dates in the past.
 
 ## Importing into Microsoft Advertising Editor
 
@@ -78,9 +78,10 @@ Warnings don't block export: places without a location ID (targeted or excluded)
 2. Choose **Import**, then **Import from file**, and pick the CSV.
 3. Check the import summary and any rows Editor flags.
 4. Add any places listed under **Add these places by hand** to each campaign's location targeting.
-5. Review, then **Post**. Campaigns arrive paused unless you chose Enabled.
+5. Pin the lines listed under **Pin these in Editor**, if any, in each ad.
+6. Review, then **Post**. Campaigns arrive paused unless you chose Enabled.
 
-The file follows Microsoft's bulk file schema (format version 6.0). New campaigns and ad groups get negative reference IDs, and every child row also carries its campaign and ad group name, so Editor can tie the rows together either way.
+The file follows Microsoft's bulk file schema (format version 6.0). New campaigns and ad groups get negative reference IDs, and every child row also carries its campaign and ad group name, so Editor can tie the rows together either way. Responsive search ads are the one exception to the schema: the Bulk API takes headlines and descriptions as a JSON list in single `Headline` and `Description` columns, but Editor's file import ignores that and skips every ad ("Missing required description1"). So the file writes them one per column, the layout Editor reads.
 
 ## Development
 

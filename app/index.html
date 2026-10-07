@@ -216,12 +216,19 @@
           <ul class="missing-list" id="missingList"></ul>
           <button type="button" class="btn btn-sm" id="missingCopy">Copy the list</button>
         </div>
+        <div class="field" id="pinsBox" hidden>
+          <span class="lbl">Pin these in Editor</span>
+          <p class="hint">Editor's file import has no pin columns, so the ads arrive unpinned. After import, open each ad and pin these lines to their positions.</p>
+          <ul class="missing-list scroll" id="pinsList"></ul>
+          <button type="button" class="btn btn-sm" id="pinsCopy">Copy the pins</button>
+        </div>
         <div><h3>Import in Microsoft Advertising Editor</h3></div>
         <ol class="steps">
           <li>Open the account in Microsoft Advertising Editor and get the latest changes.</li>
           <li>Choose <b>Import</b>, then <b>Import from file</b>, and pick the CSV.</li>
           <li>Check the import summary and any rows Editor flags.</li>
           <li>Add the places listed above, if any, under each campaign's location targeting.</li>
+          <li>Pin the lines listed under <b>Pin these in Editor</b>, if any, in each ad.</li>
           <li>Review, then <b>Post</b>. Campaigns arrive with the status you picked above.</li>
         </ol>
       </section>

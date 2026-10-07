@@ -1140,7 +1140,7 @@
     .replace(/^"(.+)"$/, '$1').replace(/\s*[✓✔]$/, '').trim();
 
   /* Pins. Microsoft keeps a pinned headline in position 1, 2 or 3 and a pinned description in position 1 or 2.
-     They are kept per ad group by text: {"h|mighty health medical travel": 1}. */
+     They are kept per ad group by text: {"h|northwind dental clinic": 1}. */
   // "Position 1", "Pin 2", "H1", "Pinned to position 3" -> 1..3
   const pinPosition = v => {
     const t = norm(v);
@@ -2005,7 +2005,7 @@
       const pinCol = (rows[shape.hi || 0] || []).findIndex(c => /^pin(?:ned)?(?:\s+(?:to|position))?$/i.test(norm(c)));
       if (pinCol >= 0 && !res.pinNote && rows.slice((shape.hi || 0) + 1).some(r => norm(r[pinCol] || '') && !/^[-–—]$/.test(norm(r[pinCol])))) {
         res.pinNote = true;
-        res.notes.push({ level: 'info', msg: 'The doc pins some headlines or descriptions. The pins go into the file; each pinned line is marked in its ad group below.' });
+        res.notes.push({ level: 'info', msg: 'The doc pins some headlines or descriptions. Editor\'s file import has no pin columns, so the pins are not in the file. Each pinned line is marked in its ad group below, and the export panel lists them to pin in Editor after import.' });
       }
       if (shape.kind === 'legend') { skip(firstRow, 'explains how the doc is laid out, so it is not imported', { kind: 'other' }); return; }
       if (shape.kind === 'assets') { skip(firstRow, 'sitelink, callout or other asset table, which is not exported', { kind: 'other' }); return; }
@@ -2406,12 +2406,20 @@
   }
 
   const fmtNum = n => (Math.round(n * 100) / 100).toLocaleString('en-US');
-  // the pins of the headlines and descriptions an ad keeps (15 and 4)
-  const keptPins = a => {
+  // the pins of the headlines and descriptions an ad keeps (15 and 4). One line per position: the first line
+  // pinned to a position keeps it, and later lines pinned there are unpinned and listed in `unpinned`
+  const keptPins = (a, unpinned) => {
     const out = {};
     const pins = a.pins || {};
-    a.headlines.slice(0, 15).forEach(h => { const k = pinKey('h', h); if (pins[k]) out[k] = pins[k]; });
-    a.descriptions.slice(0, 4).forEach(d => { const k = pinKey('d', d); if (pins[k]) out[k] = pins[k]; });
+    [['h', a.headlines.slice(0, 15)], ['d', a.descriptions.slice(0, 4)]].forEach(([t, list]) => {
+      const held = {};
+      list.forEach(x => {
+        const k = pinKey(t, x), p = pins[k];
+        if (!p || out[k]) return;
+        if (held[p]) { if (unpinned) unpinned.push({ type: t, text: norm(x), position: p, kept: held[p] }); return; }
+        held[p] = norm(x); out[k] = p;
+      });
+    });
     return out;
   };
 
@@ -2459,6 +2467,7 @@
       model.notes.push({ level: 'info', msg: '"' + a.name + '" looked like an ad group but had no keywords or ads, so it was left out.' });
       return false;
     });
+    const unpins = new Map();
     res.adGroups.forEach(a => {
       // look in the ad group's own campaign first, so "Brand" under two campaigns stays in both
       const search = list => { let b = null, sc = 0; list.forEach(L => { const s = sim(L.n, a.name); if (s > sc) { sc = s; b = L; } }); return [b, sc]; };
@@ -2473,6 +2482,7 @@
       const [p1, p2] = suggestPaths(a.name);
       const path1 = a.path1 || (props && props.path1) || '';
       const path2 = a.path2 || (props && props.path2) || '';
+      const unpinned = [];
       const g = {
         id: nid('g'), name: a.name, campaignId: camp.id,
         keywords: a.keywords, negatives: a.negatives,
@@ -2481,14 +2491,22 @@
         path1: path1 || p1, path2: path2 || (path1 ? '' : p2),
         maxCpc: a.maxCpc != null ? a.maxCpc : (props && props.maxCpc != null ? props.maxCpc : null),
         matchType: a.matchType || null,
-        pins: keptPins(a),
+        pins: keptPins(a, unpinned),
         auto: !!a.auto
       };
+      unpinned.forEach(u => { const k = [u.type, u.position, u.text, u.kept].join('|'); unpins.set(k, Object.assign(unpins.get(k) || u, { groups: ((unpins.get(k) || {}).groups || []).concat(a.name) })); });
       agIds.set(a, g.id);
       a.headlines.slice(15).forEach(h => model.skipped.push({ text: h, reason: 'over the limit of 15 headlines per ad', agId: g.id, kind: 'limit', suggest: null }));
       a.descriptions.slice(4).forEach(d => model.skipped.push({ text: d, reason: 'over the limit of 4 descriptions per ad', agId: g.id, kind: 'limit', suggest: null }));
       if (a.auto) model.notes.push({ level: 'warn', msg: '"' + a.name + '" had no name in the doc, so it was named automatically. Rename it below.' });
       model.adGroups.push(g);
+    });
+    // a second line pinned to a taken position was unpinned: one note per line, naming its ad groups
+    unpins.forEach(u => {
+      const n = u.groups.length;
+      const who = n === 1 ? u.groups[0] : n <= 3 ? u.groups.slice(0, -1).join(', ') + ' and ' + u.groups[n - 1] : u.groups.slice(0, 2).join(', ') + ' and ' + (n - 2) + ' more ad groups';
+      model.notes.push({ level: 'warn', msg: who + ': "' + u.text + '" was also pinned to ' + (u.type === 'h' ? 'Headline ' : 'Description ') + u.position
+        + ', which "' + u.kept + '" holds. Only one line can be pinned to a position, so "' + u.text + '" was unpinned.' });
     });
     res.agProps.forEach(p => {
       const matched = res.adGroups.some(a => key(a.name) === key(p.name) || sim(a.name, p.name) >= 0.6);
@@ -3012,6 +3030,8 @@
         if (list.length < (t === 'h' ? 3 : 2)) return;
         for (let p = 1; p <= n; p++) {
           if (!list.some(x => { const q = pinOf(g, t, x); return !q || q === p; })) E(Object.assign({ field: t }, o), label + ': no ' + word + ' can show in position ' + p + ', because every ' + word + ' is pinned elsewhere. Unpin one or pin one to position ' + p + '.');
+          const held = list.filter(x => pinOf(g, t, x) === p);
+          if (held.length > 1) W(Object.assign({ field: t }, o), label + ': ' + held.map(x => '"' + x + '"').join(' and ') + (held.length === 2 ? ' are both' : ' are all') + ' pinned to ' + cap(word) + ' ' + p + '. Only one line can be pinned to a position; keep the pin on one.');
         }
       });
       const seen = new Set();
@@ -3088,16 +3108,16 @@
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
   const HEADERS = ['Type', 'Status', 'Id', 'Parent Id', 'Campaign', 'Ad Group', 'Time Zone', 'Budget', 'Budget Type', 'Campaign Type', 'Language',
     'Bid Strategy Type', 'Bid Strategy MaxCpc', 'Bid Strategy TargetCpa', 'Final Url Suffix', 'Start Date', 'Network Distribution', 'Ad Rotation', 'Cpc Bid',
-    'Keyword', 'Match Type', 'Target', 'Final Url', 'Path 1', 'Path 2', 'Headline', 'Description', 'Name'];
+    'Keyword', 'Match Type', 'Target', 'Final Url', 'Path 1', 'Path 2']
+    .concat(Array.from({ length: 15 }, (x, i) => 'Headline ' + (i + 1)), Array.from({ length: 4 }, (x, i) => 'Description ' + (i + 1)), ['Name']);
   const ALWAYS = new Set(['Type', 'Status', 'Id', 'Parent Id', 'Campaign', 'Ad Group', 'Name']);
   const num = v => { const n = +v; return isFinite(n) && n > 0 ? String(Math.round(n * 100) / 100) : ''; };
   // "2026-11-05" -> "11/5/2026", the form Microsoft's bulk examples use
   const bulkDate = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ''); return m ? (+m[2]) + '/' + (+m[3]) + '/' + m[1] : ''; };
-  // Headlines and descriptions go in as a JSON list of text assets, with any pin as "pinnedField": "Headline1"
-  const assets = (g, type, list) => JSON.stringify(list.map(text => {
-    const p = pinOf(g, type, text);
-    return p ? { text, pinnedField: (type === 'h' ? 'Headline' : 'Description') + p } : { text };
-  }));
+  // Headlines and descriptions go one per column, "Headline 1" to "Headline 15" and "Description 1" to "Description 4".
+  // That is the layout Editor's file import reads; the JSON asset lists of the Bulk API make Editor skip every ad
+  // ("Missing required description1"). Editor's import has no pin columns, so pins are listed to set by hand (pinList).
+  const assetCols = (word, list) => Object.fromEntries(list.map((text, i) => [word + ' ' + (i + 1), text]));
 
   function exportRows(model, S) {
     const raw = [];
@@ -3148,7 +3168,7 @@
         row({
           kind: 'ad', Type: 'Responsive Search Ad', Status: 'Active', 'Parent Id': gid, Campaign: cn, 'Ad Group': gn,
           'Final Url': (g.finalUrl || S.finalUrl || '').trim(), 'Path 1': g.path1 || '', 'Path 2': g.path2 || '',
-          Headline: assets(g, 'h', g.headlines.map(norm).filter(Boolean).slice(0, 15)), Description: assets(g, 'd', g.descriptions.map(norm).filter(Boolean).slice(0, 4))
+          ...assetCols('Headline', g.headlines.map(norm).filter(Boolean).slice(0, 15)), ...assetCols('Description', g.descriptions.map(norm).filter(Boolean).slice(0, 4))
         });
       });
     });
@@ -3168,6 +3188,21 @@
     return out;
   }
 
+  // The pins to set by hand in Editor after import, per ad group: [{campaign, adGroup, pins: [{type, text, position, slot: "Headline 1"}]}]
+  function pinList(model) {
+    const out = [];
+    model.campaigns.forEach(c => model.adGroups.filter(g => g.campaignId === c.id).forEach(g => {
+      const pins = [];
+      [['h', 'Headline', g.headlines, 15], ['d', 'Description', g.descriptions, 4]].forEach(([t, word, list, n]) => {
+        const lines = list.map(norm).filter(Boolean).slice(0, n);
+        lines.forEach(text => { const p = pinOf(g, t, text); if (p) pins.push({ type: t, text, position: p, slot: word + ' ' + p }); });
+      });
+      pins.sort((x, y) => (x.type === y.type ? 0 : x.type === 'h' ? -1 : 1) || x.position - y.position);
+      if (pins.length) out.push({ campaign: c.name.trim(), adGroup: g.name.trim(), pins });
+    }));
+    return out;
+  }
+
   const csvCell = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   const toCSV = t => [t.headers].concat(t.rows).map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 
@@ -3183,7 +3218,7 @@
     parseHTML, parseText, parseSheets, validate, exportRows, toCSV, suggestPaths, COUNTRIES, LANGS, MS_LANGS, findCountry, parseLocations,
     parseBudget, adLen, matchSetting, sectionLabel, kwToLine, linesToKw, matchTypesFor, negBlocks, negMatch, nid, parseKeyword, deriveName, blocksToText, tidyCampaign,
     settingFrom, TIME_ZONES, guessTimeZone, msLanguages, msLocationId, locKey, geoIndex, geoLookup, missingLocations, MS_COUNTRY_IDS, platformOf,
-    pinKey, pinPosition, inlinePin, locationIdSource, zoneForCurrency, currencyOf
+    pinKey, pinPosition, inlinePin, pinList, locationIdSource, zoneForCurrency, currencyOf
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CBEngine = api;

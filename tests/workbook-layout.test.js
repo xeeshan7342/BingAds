@@ -141,8 +141,12 @@ test('one ad per ad group serves both campaigns, with its URL, paths and pins', 
     assert.equal(g.descriptions.length, 2);
     assert.equal(g.keywords.length, 2);
     assert.equal(g.path1, 'dental');
-    assert.deepEqual(g.pins, { 'h|northwind dental clinic': 1, 'h|northwind: care abroad': 1, 'd|northwind dental is the treating clinic. plans are made by our own dentists.': 1 });
+    // "Northwind: Care Abroad" is pinned to 1 too, after "Northwind Dental Clinic": one line per position, so it is unpinned
+    assert.deepEqual(g.pins, { 'h|northwind dental clinic': 1, 'd|northwind dental is the treating clinic. plans are made by our own dentists.': 1 });
   });
+  // one warning naming both ad groups that hold the ad; the other campaign's copies share it
+  assert.deepEqual(m.notes.filter(n => n.level === 'warn' && /"Northwind: Care Abroad" was also pinned to Headline 1, which "Northwind Dental Clinic" holds\. Only one line can be pinned to a position, so "Northwind: Care Abroad" was unpinned\./.test(n.msg)).map(n => n.msg.split(':')[0]),
+    ['Dental Implants and Braces']);
   assert.deepEqual(m.adGroups.map(g => [g.name, g.finalUrl, g.path2]), [
     ['Dental Implants', URL1, 'implants'], ['Braces', URL2, 'braces'], ['Dental Implants', URL1, 'implants'], ['Braces', URL2, 'braces']]);
   assert.ok(m.notes.some(n => n.msg === S2 + ': 2 ad groups have no ad of their own in the doc, so they use the ads of the same ad groups in ' + W + '.'));
@@ -165,9 +169,15 @@ test('the workbook exports with pins, exclusions, the URL suffix and ad rotation
   assert.deepEqual(south.filter(r => r.Type === 'Campaign Negative Location Criterion').map(r => r.Target), ['21', '17']);
   assert.equal(rows.find(r => r.Type === 'Campaign')['Final Url Suffix'], 'utm_source=bing&utm_medium=cpc&utm_campaign={CampaignId}');
   assert.equal(rows.find(r => r.Type === 'Ad Group')['Ad Rotation'], 'OptimizeForClicks');
-  const ad = JSON.parse(south.find(r => r.Type === 'Responsive Search Ad').Headline);
-  assert.deepEqual(ad.slice(0, 3), [{ text: 'Northwind Dental Clinic', pinnedField: 'Headline1' }, { text: 'Northwind: Care Abroad', pinnedField: 'Headline1' }, { text: 'Dental Implants Abroad' }]);
-  assert.equal(JSON.parse(south.find(r => r.Type === 'Responsive Search Ad').Description)[0].pinnedField, 'Description1');
+  const ad = south.find(r => r.Type === 'Responsive Search Ad');
+  assert.deepEqual([1, 2, 3, 4].map(i => ad['Headline ' + i]), ['Northwind Dental Clinic', 'Northwind: Care Abroad', 'Dental Implants Abroad', ad['Headline 4']]);
+  assert.ok(ad['Description 1'].startsWith('Northwind Dental is the treating clinic'));
+  assert.ok(!t.headers.includes('Headline') && !t.headers.includes('Description'));
+  // pins are listed per ad group to set in Editor, one line per position
+  const pins = E.pinList(m);
+  assert.equal(pins.length, 4);
+  assert.deepEqual(pins.find(x => x.campaign === S2).pins.map(p => p.text + ' -> ' + p.slot),
+    ['Northwind Dental Clinic -> Headline 1', 'Northwind Dental is the treating clinic. Plans are made by our own dentists. -> Description 1']);
   assert.deepEqual(E.missingLocations(m, S), []);
   // an excluded place Microsoft's list does not have is listed to exclude by hand
   const S3 = Object.assign({}, S, { excludedLocations: [{ name: 'Sharjah, United Arab Emirates', id: '' }] });
@@ -200,6 +210,20 @@ test('pins: written in a list, read from a Pin column, and checked so every posi
   g.pins = { 'h|northwind dental': 1, 'h|fast estimates': 1, 'h|book online': 1 };
   const v = E.validate(doc, settings(), '2026-10-06');
   assert.equal(msgs(v.errors, /no headline can show in position [23]/).length, 2);
+  assert.equal(msgs(v.warnings, /"Northwind Dental" and "Fast Estimates" and "Book Online" are all pinned to Headline 1\. Only one line can be pinned/).length, 1);
+});
+
+test('pins: two lines pinned to one position keep the first and unpin the rest, with a warning', () => {
+  const m = E.parseText('Ad Group 1: Implants\nKeywords\n- dental implants\nHeadlines\n- Northwind Dental (Pin 1)\n- Care Abroad (Pin 1)\n- Book Online (Pin 2)\n- Free Consult (Pin 2)\n'
+    + 'Descriptions\n- One two three four five six. (Pin 1)\n- Seven eight nine ten eleven. (Pin 1)');
+  const g = m.adGroups[0];
+  assert.deepEqual(g.pins, { 'h|northwind dental': 1, 'h|book online': 2, 'd|one two three four five six.': 1 });
+  const warns = m.notes.filter(n => n.level === 'warn' && /Only one line can be pinned to a position/.test(n.msg)).map(n => n.msg);
+  assert.deepEqual(warns, [
+    'Implants: "Care Abroad" was also pinned to Headline 1, which "Northwind Dental" holds. Only one line can be pinned to a position, so "Care Abroad" was unpinned.',
+    'Implants: "Free Consult" was also pinned to Headline 2, which "Book Online" holds. Only one line can be pinned to a position, so "Free Consult" was unpinned.',
+    'Implants: "Seven eight nine ten eleven." was also pinned to Description 1, which "One two three four five six." holds. Only one line can be pinned to a position, so "Seven eight nine ten eleven." was unpinned.']);
+  assert.deepEqual(msgs(E.validate(m, settings(), '2026-10-06').warnings, /are both pinned|are all pinned/), []);
 });
 
 test('settings rows: presence wording, exclusions inside a locations value, suffix rules, campaign type', () => {

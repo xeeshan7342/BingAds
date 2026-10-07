@@ -109,6 +109,12 @@
       try { p = navigator.clipboard.writeText(text); } catch (err) { p = Promise.reject(err); }
       p.then(() => toast('Copied the places to add in Editor.'), () => showFallback(text, 'list'));
     });
+    $('#pinsCopy').addEventListener('click', () => {
+      const text = E.pinList(state.model).map(x => x.campaign + ' › ' + x.adGroup + x.pins.map(p => '\n  ' + p.text + ' → ' + p.slot).join('')).join('\n');
+      let p;
+      try { p = navigator.clipboard.writeText(text); } catch (err) { p = Promise.reject(err); }
+      p.then(() => toast('Copied the pins to set in Editor.'), () => showFallback(text, 'list'));
+    });
     sel.addEventListener('change', e => {
       const id = e.target.value; if (!id) return;
       if (id === '__all') { S.allLocations = true; S.locations = []; }
@@ -611,7 +617,18 @@
         const f = t.dataset.pin; const text = (f === 'h' ? g.headlines : g.descriptions)[+t.dataset.i] || '';
         g.pins = g.pins || {};
         if (!E.norm(text)) { t.value = ''; toast('Write the text before pinning it.', true); return; }
-        if (t.value) g.pins[E.pinKey(f, text)] = +t.value; else delete g.pins[E.pinKey(f, text)];
+        if (t.value) {
+          // one line per position: the line pinned there before gives it up
+          const list = f === 'h' ? g.headlines : g.descriptions;
+          list.forEach((x, j) => {
+            if (j === +t.dataset.i || !E.norm(x) || +pinOf(g, f, x) !== +t.value) return;
+            delete g.pins[E.pinKey(f, x)];
+            const o = t.closest('[data-gid]').querySelector('select[data-pin="' + f + '"][data-i="' + j + '"]');
+            if (o) { o.value = ''; o.classList.remove('on'); }
+            toast('Unpinned "' + E.norm(x) + '". Only one line can be pinned to a position.');
+          });
+          g.pins[E.pinKey(f, text)] = +t.value;
+        } else delete g.pins[E.pinKey(f, text)];
         t.classList.toggle('on', !!t.value);
         state.dirty = true; updateSerp(g); refresh();
         return;
@@ -763,6 +780,9 @@
     const miss = has ? E.missingLocations(m, S) : [];
     $('#missingBox').hidden = !miss.length;
     $('#missingList').innerHTML = miss.map(x => '<li><b>' + esc(x.campaign) + '</b>' + (x.places.length ? '<span>Target: ' + esc(x.places.join('; ')) + '</span>' : '') + (x.excluded.length ? '<span>Exclude: ' + esc(x.excluded.join('; ')) + '</span>' : '') + '</li>').join('');
+    const pins = has ? E.pinList(m) : [];
+    $('#pinsBox').hidden = !pins.length;
+    $('#pinsList').innerHTML = pins.map(x => '<li><b>' + esc(x.campaign) + ' › ' + esc(x.adGroup) + '</b>' + x.pins.map(p => '<span>' + esc(p.text) + ' → ' + esc(p.slot) + '</span>').join('') + '</li>').join('');
     const t = getExport();
     $('#exportMeta').textContent = has ? t.rows.length + ' rows · ' + t.headers.length + ' columns · ' + fileName() : '';
     if ($('#previewBox').open) renderPreview();

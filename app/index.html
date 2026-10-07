@@ -96,6 +96,12 @@
         </div>
 
         <div class="field">
+          <label class="lbl" for="finalUrlSuffix">Final URL suffix <span class="mono">optional</span></label>
+          <input id="finalUrlSuffix" type="text" placeholder="utm_source=bing&amp;utm_medium=cpc" autocomplete="off" spellcheck="false">
+          <p class="hint">Tracking added to every landing page URL. No ? at the start.</p>
+        </div>
+
+        <div class="field">
           <span class="lbl" id="mtLbl">Keyword match type</span>
           <div class="seg" role="radiogroup" aria-labelledby="mtLbl">
             <label><input type="radio" name="matchType" value="phrase" id="mt-phrase"><span>Phrase</span></label>
@@ -137,6 +143,9 @@
             <select id="locAdd" aria-label="Add a country"><option value="">Add country</option><option value="__all">All countries</option></select>
             <div class="add-row"><input id="locCustom" type="text" placeholder="City, region" aria-label="Add a city or region"><button type="button" class="btn btn-sm" id="locCustomAdd">Add</button></div>
           </div>
+          <span class="lbl" id="exLbl">Excluded places</span>
+          <div class="chips" id="exChips" aria-labelledby="exLbl"></div>
+          <div class="add-row"><input id="exCustom" type="text" placeholder="Country, region or city to exclude" aria-label="Add a place to exclude"><button type="button" class="btn btn-sm" id="exCustomAdd">Exclude</button></div>
           <label class="check"><input type="checkbox" id="presenceOnly"><span>People in these locations only<small>Off also reaches people searching for or reading about them.</small></span></label>
           <div class="locid-box" id="locIdBox" hidden>
             <span class="lbl">Microsoft location IDs</span>
@@ -161,6 +170,15 @@
           <div class="langs" id="langs" aria-labelledby="langLbl"></div>
           <select id="langMore" aria-label="Add another language"><option value="">More languages</option></select>
           <p class="hint">The ad languages Microsoft offers. None ticked means all languages.</p>
+        </div>
+
+        <div class="field">
+          <label class="lbl" for="adRotation">Ad rotation</label>
+          <select id="adRotation">
+            <option value="">Microsoft default (optimize for clicks)</option>
+            <option value="OptimizeForClicks">Optimize for clicks</option>
+            <option value="RotateAdsEvenly">Rotate ads evenly</option>
+          </select>
         </div>
 
         <label class="check"><input type="checkbox" id="searchPartners"><span>Include search partners<small>Off keeps ads on Microsoft's own search network. On adds syndicated partner sites.</small></span></label>
@@ -194,7 +212,7 @@
         </div>
         <div class="field" id="missingBox" hidden>
           <span class="lbl">Add these places by hand</span>
-          <p class="hint">They have no Microsoft location ID, so the file leaves them out.</p>
+          <p class="hint">They have no Microsoft location ID, so the file leaves them out. Add them to each campaign's location targeting, and the excluded ones as excluded locations.</p>
           <ul class="missing-list" id="missingList"></ul>
           <button type="button" class="btn btn-sm" id="missingCopy">Copy the list</button>
         </div>

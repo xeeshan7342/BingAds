@@ -136,5 +136,6 @@ test('table doc with "MH | Cancer | Search" campaign names, a Why column, locati
   assert.deepEqual([m.detected.languages, m.detected.locations, m.detected.bidStrategy, m.detected.maxCpc], [['en'], undefined, 'ecpc', 50]);
   assert.ok(m.notes.some(n => /do not offer manual CPC/.test(n.msg)));
   assert.ok(m.notes.some(n => /Not used from the locations: "Add Ghana if offered\."/.test(n.msg)));
-  assert.ok(m.notes.some(n => /Pins are not exported/.test(n.msg)));
+  assert.ok(m.notes.some(n => /The pins go into the file/.test(n.msg)));
+  assert.deepEqual(m.adGroups.map(g => g.pins), [{ 'h|breast cancer care india': 1 }, { 'h|breast cancer care india': 1 }]);
 });

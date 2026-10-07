@@ -207,12 +207,54 @@
   }
 
   // One spreadsheet tab (or a CSV file) -> blocks. The tab name acts as a heading.
+  // A tab often holds several tables under title rows ("Budget", "Campaign settings") with notes between them, and
+  // starts with a title and a line of instructions. Those rows become headings and notes, and each table stands alone.
+  const filledCells = r => r.filter(Boolean).length;
+  const isTitleCell = t => t.length <= 60 && !/[.!?]$/.test(t) && !t.includes('\n') && !/https?:\/\/|www\./i.test(t);
+  const HEAD_WORD = /^(?:settings?|values?|items?|names?|fields?|#|no\.?|status|why|notes?|reasons?|details?|descriptions?|count|characters|check|limit)$/i;
+  // a header row: short labels, at least `min` of them ones the tool knows
+  const headerLike = (r, min, strict) => {
+    const cells = r.filter(Boolean);
+    if (cells.length < 2 || !cells.every(c => c.length <= 40 && !/[.!?]$/.test(c))) return false;
+    return cells.filter(c => { const f = hdrField(c); return (f && f !== 'ignore') || (!strict && (settingLabel(c) || HEAD_WORD.test(norm(c).replace(/\([^)]*\)/g, '').trim()))); }).length >= (min || 1);
+  };
+  // columns that are empty in every row of a table (a blank column A, a gap between two side-by-side tables)
+  const dropEmptyCols = rows => {
+    const width = Math.max(0, ...rows.map(r => r.length));
+    const keep = [];
+    for (let i = 0; i < width; i++) if (rows.some(r => r[i])) keep.push(i);
+    return rows.map(r => keep.map(i => r[i] || ''));
+  };
   function rowsToBlocks(rows, sheetName) {
     const out = [];
     const nm = norm(sheetName);
     if (nm && !/^(?:sheet|tab|page)\s*\d*$/i.test(nm)) out.push({ t: 'h', level: 1, text: nm, sheet: true });
     const clean = (rows || []).map(r => r.map(cellNorm)).filter(r => r.some(Boolean));
-    if (clean.length) out.push({ t: 'table', rows: clean });
+    if (!clean.length) return out;
+    // a tab that is one list keeps its column as it is
+    if (clean.every(r => filledCells(r) <= 1)) { out.push({ t: 'table', rows: clean }); return out; }
+    const firstMulti = clean.findIndex(r => filledCells(r) >= 2);
+    let buf = [];
+    const flush = () => { if (buf.length) out.push({ t: 'table', rows: dropEmptyCols(buf) }); buf = []; };
+    clean.forEach((r, i) => {
+      if (filledCells(r) === 1) {
+        const one = r.find(Boolean);
+        const next = clean[i + 1];
+        // up to three lines above the first table, a title over a header row, or a paragraph between tables;
+        // "Campaign: Installs | all phrase match" stays with its table, which reads it
+        const labelled = /^[^:]{1,40}:\s*\S/.test(one);
+        const preamble = i < firstMulti && firstMulti <= 3 && !labelled;
+        const titled = isTitleCell(one) && !labelled && next && headerLike(next, 1);
+        if (preamble || titled || one.length > 120) {
+          flush();
+          if (isTitleCell(one)) out.push({ t: 'h', level: 2, text: stripIcon(one), sheetTitle: true });
+          else out.push({ t: 'p', text: norm(one), bold: false, note: true });
+          return;
+        }
+      } else if (buf.length && headerLike(r, 3, true)) flush();
+      buf.push(r);
+    });
+    flush();
     return out;
   }
 
@@ -230,7 +272,7 @@
     ['adcopy', false, /^(?:(?:the|our|suggested|recommended|final|proposed|sample|example)\s+)*(?:rsas?|responsive search ads?|search ads?|ad copy|ads|ad|ad creatives?|creatives?|text ads?|ad variations?|ad texts?|ad copies)(?:\s+(?:copy|set|sets|variations?|options|version|versions|text|a|b|c))*$/],
     // asset types are never keywords or ad text, so they end a list even as a plain line
     ['other', true, /^(?:(?:ad|campaign|account|recommended|suggested|optional|additional)\s+)*(?:level\s+)?(?:sitelinks?|site links?|sitelink (?:extensions?|assets?)|callouts?|callout (?:extensions?|assets?|text)|structured snippets?|ad (?:extensions?|assets)|image (?:extensions?|assets?)|call (?:extensions?|assets?)|promotion (?:extensions?|assets?)|price (?:extensions?|assets?)|lead form (?:extensions?|assets?)|location (?:extensions?|assets?)|app (?:extensions?|assets?))$/],
-    ['other', false, /^(?:(?:ad|campaign|account|recommended|suggested|optional|additional|key|important|general|final|pro|quick|bonus|expert|extra|helpful|our|my)\s+)*(?:level\s+)?(?:sitelinks?|site links?|sitelink (?:extensions?|assets?)|callouts?|callout (?:extensions?|assets?|text)|structured snippets?|snippets?|extensions?|assets?|ad (?:extensions?|assets)|images?|image (?:extensions?|assets?)|logos?|business (?:name|logo)|call (?:extensions?|assets?)|phone (?:number|extensions?|assets?)|promotions?|promotion (?:extensions?|assets?)|price (?:extensions?|assets?)|prices|lead forms?|location (?:extensions?|assets?)|app (?:extensions?|assets?)|notes?|strategy|rationale|reasoning|why|tips?|recommendations?|next steps?|checklist|to ?do|todo|landing pages? (?:notes|recommendations|suggestions|requirements|tips)|audiences?|audience (?:targeting|signals|segments|lists)|demographics?|ad schedul(?:e|ing)|schedul(?:e|ing)|day ?parting|conversion (?:tracking|actions?|goals?|setup)|conversions|kpis?|goals?|objectives?|measurement|tracking|reporting|budget (?:plan|split|allocation|breakdown|notes|rationale)|bid (?:adjustments|modifiers)|devices?|device (?:targeting|bid adjustments)|overview|summary|scope|assumptions|compliance|policy(?: notes)?|before you launch|launch checklist|optimi[sz]ation(?: plan| tips)?|timeline|appendix|references?|faqs?|questions|contents|table of contents|introduction|background|competitors?|competitor analysis|keyword research|research|analysis|insights|structure|account structure|campaign structure|naming conventions?|glossary)$/],
+    ['other', false, /^(?:(?:ad|campaign|account|recommended|suggested|optional|additional|key|important|general|final|pro|quick|bonus|expert|extra|helpful|our|my)\s+)*(?:level\s+)?(?:sitelinks?|site links?|sitelink (?:extensions?|assets?)|callouts?|callout (?:extensions?|assets?|text)|structured snippets?|snippets?|extensions?|assets?|ad (?:extensions?|assets)|images?|image (?:extensions?|assets?)|logos?|business (?:name|logo)|call (?:extensions?|assets?)|phone (?:number|extensions?|assets?)|promotions?|promotion (?:extensions?|assets?)|price (?:extensions?|assets?)|prices|lead forms?|location (?:extensions?|assets?)|app (?:extensions?|assets?)|notes?|strategy|rationale|reasoning|why|tips?|recommendations?|next steps?|checklist|to ?do|todo|landing pages? (?:notes|recommendations|suggestions|requirements|tips)|audiences?|audience (?:targeting|signals|segments|lists)|demographics?|ad schedul(?:e|ing)|schedul(?:e|ing)|day ?parting|conversion (?:tracking|actions?|goals?|setup)|conversions|kpis?|goals?|objectives?|measurement|tracking|reporting|budget (?:plan|split|allocation|breakdown|notes|rationale)|bid (?:adjustments|modifiers)|devices?|device (?:targeting|bid adjustments)|overview|summary|scope|assumptions|compliance|policy(?: notes)?|before you launch|launch checklist|optimi[sz]ation(?: plan| tips)?|timeline|appendix|references?|faqs?|questions|contents|table of contents|introduction|background|competitors?|competitor analysis|keyword research|research|analysis|insights|structure|account structure|campaign structure|naming conventions?|glossary|dashboard|kpi dashboard|scorecard|cover|cover (?:sheet|page)|read ?me|instructions|how to use(?: this (?:file|sheet|workbook|doc))?|legend|change ?log|version history|revision history)$/],
     ['settings', false, /^(?:(?:google|microsoft|bing|search|ppc|sem|campaign|campaigns|account|ad ?group|global|default|general|key|basic|initial|recommended)\s+)*(?:level\s+)?(?:settings|setup|set up|configuration|config|targeting|targeting settings|bidding|bid strategy|bidding strategy|budgets?|daily budget|monthly budget|locations?|location targeting|geo ?targeting|geos?|languages?|networks?|details|parameters|final urls?|landing pages?|landing page urls?|urls?)$/]
   ];
   const ROLE_SECTIONS = new Set(['keywords', 'negatives', 'headlines', 'descriptions', 'adcopy', 'other', 'settings']);
@@ -674,12 +716,12 @@
 
   function parseLocations(value) {
     let v = norm(value);
-    const info = { presence: null, notes: [] };
+    const info = { presence: null, notes: [], excluded: '' };
     if (/\bpresence\b/i.test(v)) info.presence = !/\binterest\b/i.test(v) || /presence only/i.test(v);
     const ex = v.match(/[,;(]?\s*\b(?:excluding|exclude[sd]?|except|but not|not including|minus|without)\b\s*:?\s*([^)]*)\)?\s*$/i);
-    if (ex) { info.notes.push('Excluded locations (' + norm(ex[1]) + ') are not exported. Add them in Microsoft Advertising Editor as excluded locations.'); v = v.slice(0, ex.index); }
+    if (ex) { info.excluded = norm(ex[1]); v = v.slice(0, ex.index); }
     // "Per campaign below." or "See the campaign table": the places are given elsewhere
-    if (/^(?:per campaign|by campaign|varies by campaign|see (?:below|above|the campaign|campaign|each campaign)|set per campaign|tbd|tbc|to be (?:confirmed|decided))\b/i.test(v)) return { list: [], presence: info.presence, notes: [] };
+    if (/^(?:per campaign|by campaign|varies by campaign|see (?:below|above|the campaign|campaign|each campaign)|set per campaign|tbd|tbc|to be (?:confirmed|decided))\b/i.test(v)) return { list: [], presence: info.presence, notes: [], perCampaign: true };
     // "Nigeria, Cameroon, The Gambia. Add Ghana and Liberia if offered.": the places end at the first full sentence
     v = v.replace(/\bD\.\s?C\.?(?=\s|,|;|$)/g, 'DC');
     const sb = v.match(/\b(?!(?:ste|sta|sto|mte|mts|mtn|ave|blvd|hwy|dept|govt|est|inc|ltd|corp)\.)([\p{L}]{3,}|[A-Z]{2})\.\s+(?=\p{Lu})/u);
@@ -792,8 +834,11 @@
       if (o.country && !has(o.country)) name += ', ' + o.country;
       return { name, id: '' };
     }).filter((l, i, a) => a.findIndex(x => x.name.toLowerCase() === l.name.toLowerCase()) === i);
-    return { list, presence: info.presence, notes: info.notes };
+    return { list, presence: info.presence, notes: info.notes, excluded: info.excluded };
   }
+  // "Ghana, Malawi, Uganda. Add them as excluded locations so they cannot receive ads." -> the places only
+  const excludedPlaces = v => parseLocations(norm(v).replace(/(?<![A-Z])\.\s+\p{Lu}.*$/u, '').replace(/^(?:excluding|exclude[sd]?|except|not)\s*:?\s*/i, '')).list
+    .filter(l => l.id || l.name.split(',')[0].trim().split(' ').length <= 5);
 
   /* Amounts in any currency: the bulk file has no currency, so only the number matters.
      "$1,500", "1.500 €", "1 500 zł", "CHF 1'200", "₹2,00,000", "R$ 2.500,50", "AED 18,000", "١٢٠٠", "1.5k", "₹1.5L", "₹1.2 Cr", "1.2M", "Rp 1,5 juta" */
@@ -927,6 +972,10 @@
     ['bidStrategy', /^(?:(?:campaign|recommended|suggested|initial|starting)\s+)?(?:bid(?:ding)?(?:\s+strategy)?(?:\s+type)?|strategy type|bidding approach|bidding method|bid type)$/],
     ['targetCpa', /^(?:(?:target|max|desired|goal)\s+)?(?:cpa|cost per (?:conversion|acquisition|lead))(?:\s+(?:target|goal))?$|^tcpa$/],
     ['maxCpc', /^(?:(?:default|ad group|max(?:imum)?|starting|initial)\s+)+(?:cpc|bid|cpc bid)(?:\s+limit)?$|^max(?:imum)? cpc(?: bid)?$/],
+    ['excludedLocations', /^(?:excluded?|exclusions?|negative|blocked)\s+(?:locations?|countries|geos?|markets?|regions?|areas?|cities)(?:\s+at\s+launch)?$|^(?:locations?|countries|geos?|markets?|regions?)\s+(?:to\s+exclude|excluded|exclusions?)$|^excluded(?:\s+at\s+launch)?$|^do not target$/],
+    ['finalUrlSuffix', /^(?:final\s+)?url\s+suffix$|^tracking\s+suffix$/],
+    ['adRotation', /^(?:ad\s+)?rotation$/],
+    ['campaignType', /^campaign\s+type$|^type\s+of\s+campaign$/],
     ['locations', /^(?:(?:target|targeted|targeting|campaign|geo)\s+)?(?:locations?|geo(?:graph(?:y|ies))?|geos?|geo target(?:ing|s)?|countries|country|markets?|regions?|cities|city|areas?|service areas?|location targeting|geographic targeting|locations to target)$/],
     ['languages', /^(?:target(?:ed)?\s+)?languages?$/],
     ['finalUrl', /^(?:(?:default|main|campaign|ad group)\s+)?(?:final\s+urls?|landing\s+pages?(?:\s+urls?)?|lp(?:\s+url)?|destination(?:\s+urls?)?|urls?|website|web\s+site|site|domain)$/],
@@ -990,8 +1039,16 @@
         const r = parseLocations(v);
         // a long sentence is not a place; "Dubai Hills Estate, Dubai, United Arab Emirates" is
         const list = r.list.filter(l => l.id || l.name.split(',')[0].trim().split(' ').length <= 5);
-        return list.length || r.presence != null ? { k, v: list, presence: r.presence, notes: r.notes } : null;
+        const excluded = r.excluded ? excludedPlaces(r.excluded) : [];
+        return list.length || r.presence != null || r.perCampaign || excluded.length ? { k, v: list, presence: r.presence, notes: r.notes, excluded } : null;
       }
+      case 'excludedLocations': { const list = excludedPlaces(v); return list.length ? { k, v: list } : null; }
+      case 'finalUrlSuffix': {
+        const sfx = v.replace(/^[?&#\s]+/, '').trim();
+        return /=/.test(sfx) && !/\s/.test(sfx) && !/^https?:/i.test(sfx) ? { k, v: sfx } : null;
+      }
+      case 'adRotation': return /even|rotate|equal|indefinite/i.test(v) ? { k, v: 'RotateAdsEvenly' } : /optimi[sz]|best|click|perform|default/i.test(v) ? { k, v: 'OptimizeForClicks' } : null;
+      case 'campaignType': return { k, v: /\bsearch\b/i.test(v) ? 'search' : norm(v) };
       case 'languages': {
         if (/^(?:all|all languages|any|any language|every language)\.?$/i.test(v)) return { k, v: [], unknown: [], notOffered: [] };
         const parts = v.split(/,|;|\/|\band\b|&|\+/i).map(x => norm(x).replace(/[.!:;]+$/, '')).filter(Boolean);
@@ -1013,7 +1070,12 @@
         if (/partner/i.test(label)) return { k, v: !no && /\b(yes|on|include[sd]?|enabled?|true)\b/i.test(v) };
         return { k, v: /partner/i.test(v) && !no };
       }
-      case 'presence': return /presence|interest/i.test(v) ? { k, v: !/interest/i.test(v) || /presence only/i.test(v) } : null;
+      case 'presence': {
+        // "People in your targeted locations" is presence; "people in, searching for or viewing pages about" is not
+        if (/presence only|\bpeople in\b(?![^.]*\b(?:search|interest|viewing|about)\b)|physically|located in|live in|regularly in/i.test(v)) return { k, v: true };
+        if (/presence|interest|search(?:ing)? for|viewing|about/i.test(v)) return { k, v: !/interest|search|viewing|about/i.test(v) || /presence only/i.test(v) };
+        return null;
+      }
       case 'startDate': { const d = parseDate(v); return d ? { k, v: d.date, ambiguous: !!d.ambiguous, raw: v } : null; }
       case 'path1': case 'path2': return { k, v: cleanPath(v) };
       case 'displayPath': { const p = splitDisplayPath(v); return p[0] ? { k, v: p } : null; }
@@ -1062,6 +1124,25 @@
 
   const cleanCopy = s => norm(s).replace(STRIP_NUM, '').replace(PIN_NOTE, '').replace(TRAIL_COUNT, '').replace(PIN_NOTE, '')
     .replace(/^"(.+)"$/, '$1').replace(/\s*[✓✔]$/, '').trim();
+
+  /* Pins. Microsoft keeps a pinned headline in position 1, 2 or 3 and a pinned description in position 1 or 2.
+     They are kept per ad group by text: {"h|mighty health medical travel": 1}. */
+  // "Position 1", "Pin 2", "H1", "Pinned to position 3" -> 1..3
+  const pinPosition = v => {
+    const t = norm(v);
+    if (!t) return null;
+    const m = t.match(/^(?:(?:pin(?:ned)?|position|pos\.?|slot)\s*(?:to\s*)?(?:position\s*)?#?\s*|[hd]\s*|(?:headline|description)\s*)?([1-3])$/i);
+    return m ? +m[1] : null;
+  };
+  // a pin written into a list line: "Northwind Dental Clinic (pinned to position 1)", "... - Pin 1", "... [P2]"
+  const inlinePin = s => {
+    const m = norm(s).match(PIN_NOTE);
+    if (!m) return null;
+    const p = m[0].match(/(?:pin(?:ned)?|position|pos\.?|\bp)\s*(?:to\s*)?(?:position\s*)?#?\s*([1-3])\b/i);
+    return p ? +p[1] : null;
+  };
+  const pinKey = (type, text) => type + '|' + norm(text).toLowerCase();
+  const setPin = (a, type, text, pos) => { if (a && text && pos) (a.pins = a.pins || {})[pinKey(type, cleanCopy(text))] = pos; };
 
   /* ---------- tables ---------- */
 
@@ -1136,6 +1217,17 @@
     const pipeRows = rows.slice(1).filter(r => r.some(c => /\S \| \S/.test(c))).length;
     if (hi < 0 && rows.length >= 4 && pipeRows >= (rows.length - 1) * 0.6) return { kind: 'legend', rows };
     const fields = hi >= 0 ? rows[hi].map(hdrField) : [];
+    // "Phrase | Exact | Total" holding counts, or a Campaigns column of numbers, is a summary column, not content
+    fields.forEach((f, ix) => {
+      if (!f || f === 'ignore' || !(COPY_FIELDS.has(f) || f === 'campaign' || f === 'adgroup')) return;
+      const vals = rows.slice(hi + 1).map(r => r[ix]).filter(Boolean);
+      if (vals.length && vals.every(v => /^[\d\s.,%/+-]+$/.test(v))) fields[ix] = 'ignore';
+    });
+    // dashboard tiles: "CAMPAIGNS | AD GROUPS | KEYWORDS" over "2 | 10 | 190"
+    if (hi >= 0 && rows[hi + 1]) {
+      const heads = rows[hi].filter(Boolean), vals = rows[hi + 1].filter(Boolean);
+      if (heads.length >= 3 && heads.every(isCaps) && vals.length && vals.filter(v => /^[\d\s.,%/+$€£₹-]+$|^\d+\s+of\s+\d+$/i.test(v)).length >= vals.length * 0.6) return { kind: 'summary', rows };
+    }
     const has = f => fields.includes(f);
     if (hi >= 0) {
       const head = rows[hi].map(c => norm(c).toLowerCase());
@@ -1158,6 +1250,10 @@
       || ((has('campaign') || has('adgroup')) && headCells.every(c => hdrField(c) || isFieldLabel(c) || HEADER_CELL.test(c))));
     const firstCol = rows.map(r => r[0] || '').filter(Boolean);
     const labels = firstCol.filter(isFieldLabel).length;
+    // "Setting | Value | Why": a settings table, even when most of its rows are things the tool does not export
+    const kvHead = /^(?:settings?|parameters?|fields?|items?|options?|attributes?|properties|keys?)$/i.test(h0[0] || '')
+      && /^(?:values?|details?|settings?|choices?|answers?|recommendations?|setup|configuration|selection)$/i.test(h0[1] || '');
+    if (kvHead && rows.length >= 2 && labels >= 1) return { kind: 'kv', rows, multi: false, hasCopy: false, settingsTable: true };
     if (!headerish && labels >= 2 && labels >= firstCol.length * 0.5) {
       const head = rows[0];
       const rest = head.slice(1).filter(Boolean);
@@ -1223,6 +1319,8 @@
 
   function classify(b, mem) {
     if (b.t === 'table') return { k: 'table', level: 99 };
+    // a paragraph of instructions in a spreadsheet tab
+    if (b.note) return { k: 'sheetNote', level: 9 };
     const text = b.t === 'li' ? b.text : stripOutline(b.text);
     const isLi = b.t === 'li';
     const level = b.t === 'h' ? b.level : (b.t === 'p' && b.bold ? 7 : (isLi ? 10 : 9));
@@ -1294,8 +1392,12 @@
       return n;
     };
     const firstTitle = cls.findIndex(c => c.k === 'heading' || c.k === 'campaign' || c.k === 'adgroup');
+    // title rows inside a Notes, Dashboard or Assets tab are never campaigns or ad groups
+    const inOtherTab = [];
+    let tabOther = false;
+    for (let i = 0; i < n; i++) { if (blocks[i].sheet) tabOther = cls[i].k === 'section' && cls[i].sec === 'other'; inOtherTab[i] = tabOther && !blocks[i].sheet; }
     const heads = [];
-    for (let i = 0; i < n; i++) if (cls[i].k === 'heading' && cls[i].level <= 8) heads.push(i);
+    for (let i = 0; i < n; i++) if (cls[i].k === 'heading' && cls[i].level <= 8 && !inOtherTab[i]) heads.push(i);
     heads.sort((a, b) => lvl(b) - lvl(a) || a - b);  // deepest first, so parents see inferred children
     const holders = [];
     heads.forEach(i => {
@@ -1417,7 +1519,7 @@
     opts = opts || {};
     const res = {
       title: '', campaignHint: '', mapping: [], adGroups: [], accountNegatives: [], campaignNegatives: {}, campaignNegNames: {}, campaignLocations: {},
-      settings: {}, campaignBudgets: {}, campaignBids: {}, campaignUrls: {}, campaignLangs: {}, campaignMaxCpc: {}, globalBudget: null, agProps: [], notes: [], skipped: []
+      settings: {}, campaignBudgets: {}, campaignBids: {}, campaignUrls: {}, campaignLangs: {}, campaignMaxCpc: {}, campaignExcluded: {}, globalBudget: null, agProps: [], notes: [], skipped: []
     };
     const cls = blocks.map(b => classify(b, opts.memory));
     const shapes = blocks.map(b => b.t === 'table' ? tableShape(b.rows) : null);
@@ -1562,6 +1664,8 @@
         const t = ensureAg();
         const list = s === 'headlines' ? t.headlines : t.descriptions;
         list.push(piece);
+        const pin = pieces.length === 1 ? inlinePin(text) : null;
+        if (pin) setPin(t, s === 'headlines' ? 'h' : 'd', piece, pin);
         last = { added: { list, value: piece } };
       });
       return last;
@@ -1577,6 +1681,16 @@
         return;
       }
       if (k === 'budget') { if (campCtx) res.campaignBudgets[key(campCtx)] = s.v; else res.globalBudget = s.v; return; }
+      if (k === 'excludedLocations' || (k === 'locations' && s.excluded && s.excluded.length)) {
+        const list = k === 'excludedLocations' ? s.v : s.excluded;
+        const bucket = campCtx ? (res.campaignExcluded[key(campCtx)] = res.campaignExcluded[key(campCtx)] || []) : (res.settings.excludedLocations = res.settings.excludedLocations || []);
+        list.forEach(l => { if (!bucket.some(x => x.name.toLowerCase() === l.name.toLowerCase())) bucket.push(l); });
+        if (k === 'excludedLocations') return;
+      }
+      if (k === 'campaignType') {
+        if (s.v !== 'search') res.notes.push({ level: 'warn', msg: 'The doc sets the campaign type to "' + s.v + '". This tool builds Search campaigns only.' });
+        return;
+      }
       if (k === 'locations') {
         if (s.presence != null) res.settings.presenceOnly = s.presence;
         (s.notes || []).forEach(msg => res.notes.push({ level: 'warn', msg }));
@@ -1800,6 +1914,9 @@
         case 'note':
           skip(text, 'ignored because you taught the tool to skip it', { kind: 'taught' }); lastPlain = null;
           return;
+        case 'sheetNote':
+          skip(text, 'a note in the spreadsheet, not campaign content', { kind: 'note' }); lastPlain = null;
+          return;
         case 'platform': {
           if (c.level <= agLevel) { ag = null; agLevel = 99; }
           if (c.level <= campLevel) { campCtx = null; campLevel = 99; }
@@ -1846,7 +1963,7 @@
           if (c.level <= campLevel) { campCtx = null; campLevel = 99; }
           section = null; secInfo = null;
           lastPlain = null;
-          if (b.t === 'h' && !b.sheet && text !== res.title) skip(text, 'heading the tool did not recognise', { kind: 'heading' });
+          if (b.t === 'h' && !b.sheet && text !== res.title) skip(text, b.sheetTitle ? 'a title row in the spreadsheet' : 'heading the tool did not recognise', { kind: 'heading' });
           return;
       }
       content(b, step);
@@ -1874,11 +1991,12 @@
       const pinCol = (rows[shape.hi || 0] || []).findIndex(c => /^pin(?:ned)?(?:\s+(?:to|position))?$/i.test(norm(c)));
       if (pinCol >= 0 && !res.pinNote && rows.slice((shape.hi || 0) + 1).some(r => norm(r[pinCol] || '') && !/^[-–—]$/.test(norm(r[pinCol])))) {
         res.pinNote = true;
-        res.notes.push({ level: 'info', msg: 'The doc pins some headlines or descriptions. Pins are not exported; set them in Microsoft Advertising Editor after import if you want them.' });
+        res.notes.push({ level: 'info', msg: 'The doc pins some headlines or descriptions. The pins go into the file; each pinned line is marked in its ad group below.' });
       }
       if (shape.kind === 'legend') { skip(firstRow, 'explains how the doc is laid out, so it is not imported', { kind: 'other' }); return; }
       if (shape.kind === 'assets') { skip(firstRow, 'sitelink, callout or other asset table, which is not exported', { kind: 'other' }); return; }
       if (shape.kind === 'comparison') { skip(firstRow, 'comparison table between platforms, not ad content', { kind: 'other' }); return; }
+      if (shape.kind === 'summary') { skip(firstRow, 'summary figures, not campaign content', { kind: 'other' }); return; }
       // an "Overview" or "Brief" tab that lists settings: read the settings, report the rest
       if (section === 'other' && shape.kind === 'kv' && !shape.multi && secInfo && secInfo.sheet) {
         rows.forEach(r => {
@@ -1890,8 +2008,9 @@
         });
         return;
       }
-      // inside "Sitelinks", "Notes" or "Overview" only campaign tables are read
-      if (section === 'other' && shape.kind !== 'mapping' && shape.kind !== 'budgets') {
+      // inside "Sitelinks", "Notes" or "Overview" only campaign tables are read, and a "Structure" table's URLs and paths
+      const propsOnly = shape.kind === 'records' && !shape.copy && shape.agCol;
+      if (section === 'other' && shape.kind !== 'mapping' && shape.kind !== 'budgets' && !propsOnly) {
         skip(firstRow, 'table in the "' + norm(secInfo.label).replace(/:$/, '') + '" section, which is not exported', { kind: 'other' });
         return;
       }
@@ -1914,6 +2033,8 @@
           res.manualNote = true;
           res.notes.push({ level: 'info', msg: 'The doc asks for manual CPC. Microsoft Search campaigns do not offer manual CPC, so they use Enhanced CPC: your ad group bids are the starting point and Microsoft adjusts them for each auction.' });
         }
+        const laterMsg = s.later ? 'Bidding starts on ' + BID_NAMES[s.v] + ', as the doc says. The doc also plans a later move to ' + BID_NAMES[s.later] + '; make that change in Microsoft Advertising when the time comes.' : '';
+        if (laterMsg && !res.notes.some(n => n.msg === laterMsg)) res.notes.push({ level: 'info', msg: laterMsg });
         return { bid: s.v, targetCpa: s.targetCpa || (s.v === 'tcpa' && cpa > 0 ? cpa : null) };
       };
       // a campaign table's own Locations and Languages columns
@@ -1949,8 +2070,8 @@
           addItem(/^h/i.test(m[1]) ? 'headlines' : 'descriptions', v.replace(/\n/g, ' '), true);
           return;
         }
-        if (/\b(?:suffix|template|tracking|utm|parameters?)\b/i.test(label)) { skip(label + ': ' + norm(v), 'tracking setting, not exported. Set it in Microsoft Advertising Editor if you use it.', { kind: 'other' }); return; }
-        if (/\b(?:final url|landing page|lp|url)\b/i.test(label) && !findUrl(v)) { skip(label + ': ' + norm(v), 'describes the landing page but gives no URL. Put the page address in this ad group\'s Final URL box.', { kind: 'lp' }); return; }
+        if (/\b(?:suffix|template|tracking|utm|parameters?)\b/i.test(label) && settingLabel(label) !== 'finalUrlSuffix') { skip(label + ': ' + norm(v), 'tracking setting, not exported. Set it in Microsoft Advertising Editor if you use it.', { kind: 'other' }); return; }
+        if (/\b(?:final url|landing page|lp|url)\b/i.test(label) && !findUrl(v) && settingLabel(label) !== 'finalUrlSuffix') { skip(label + ': ' + norm(v), 'describes the landing page but gives no URL. Put the page address in this ad group\'s Final URL box.', { kind: 'lp' }); return; }
         if (/^(?:sitelinks?|callouts?|structured snippets?|snippets?)\b/i.test(label)) { skip(label + ': ' + norm(v), 'in the "' + label + '" row, which is not exported', { kind: 'other' }); return; }
         const sl = sectionLabel(label);
         if (sl && !sl.inline && COPY.has(sl.sec)) {
@@ -1962,18 +2083,27 @@
         const s = settingFrom(label, v.replace(/\n/g, ', '));
         if (s) { applySetting(s, false); return; }
         if (sl && sl.sec === 'other') { skip(label + ': ' + norm(v), 'in the "' + label + '" row, which is not exported', { kind: 'other' }); return; }
+        if (shape.settingsTable) { skip(label + ': ' + norm(v), 'a setting the tool does not export. Set it in Microsoft Advertising Editor if you need it.', { kind: 'other' }); return; }
         skip(label + ': ' + norm(v), 'table row the tool did not recognise', { kind: 'table' });
       };
       // "Campaign | Ad Group | Asset | Text": one row per headline, description, URL or path
       if (shape.kind === 'longcopy') {
         const { ei, vi, ci, ai } = shape;
+        // a "Position" column is often the asset's number, so only a Pin column pins
+        const pi = (rows[0] || []).findIndex(c => /^pin(?:ned)?(?:\s+(?:to|position))?$/i.test(norm(c)));
         const prevAg = ag, prevCamp = campCtx;
         let curCamp = null, curAg = null;
         rows.slice(1).forEach(r => {
           if (ci >= 0 && r[ci] && !isTotalRow(r[ci])) { curCamp = tidyCampaign(r[ci]); if (ai < 0) curAg = null; }
           if (ai >= 0 && r[ai]) curAg = getAg(r[ai], curCamp || prevCamp);
           campCtx = curCamp || prevCamp; ag = curAg || prevAg;
-          kvApply(norm(r[ei] || ''), r[vi] || '');
+          const label = norm(r[ei] || ''), value = r[vi] || '';
+          // "Cancer Treatment India | | https://...": the ad group row gives its final URL
+          if (!label && ag && findUrl(value) && /^\s*(?:https?:\/\/|www\.)/i.test(value)) { ag.finalUrl = findUrl(value); return; }
+          const before = ag ? ag.headlines.length + ag.descriptions.length : 0;
+          kvApply(label, value);
+          const pin = pi >= 0 ? pinPosition(r[pi]) : null;
+          if (pin && ag && ag.headlines.length + ag.descriptions.length > before) setPin(ag, /^(?:h|headline)/i.test(label) ? 'h' : 'd', norm(value), pin);
         });
         // a table that names its own ad groups leaves none open: "Total ad rows: 440" or a negatives list after it is not theirs
         if (ai >= 0) { ag = null; agLevel = 99; section = null; secInfo = null; } else ag = prevAg;
@@ -2070,6 +2200,7 @@
           if (rowBid) res.campaignBids[key(curCamp)] = rowBid;
           if (curCamp && campName) campCols(fields, r, curCamp);
           const agName = col('adgroup') >= 0 ? r[col('adgroup')] : '';
+          if (agName && isTotalRow(agName)) return;
           const rowHasCopy = fields.some((f, ix) => COPY_FIELDS.has(f) && r[ix] && !/^\d+$/.test(r[ix]));
           const bc = budgetCol(head, fields);
           if (curCamp && bc >= 0 && r[bc]) { const b = parseBudget(head[bc], r[bc]); if (b) res.campaignBudgets[key(curCamp)] = b; }
@@ -2133,8 +2264,10 @@
               });
               else addNegs(v, matchCell);
             }
-            else if (f === 'headlines') v.split('\n').forEach(line => addItem('headlines', line, true));
-            else if (f === 'descriptions') v.split('\n').forEach(line => addItem('descriptions', line, true));
+            else if (f === 'headlines' || f === 'descriptions') {
+              const pin = pinCol >= 0 && fields.filter((x, j) => (x === 'headlines' || x === 'descriptions') && r[j]).length === 1 ? pinPosition(r[pinCol]) : null;
+              v.split('\n').forEach(line => { addItem(f, line, true); if (pin) setPin(ensureAg(), f === 'headlines' ? 'h' : 'd', line, pin); });
+            }
             else if (f === 'finalUrl') { const u = findUrl(v); if (u) ensureAg().finalUrl = u; }
             else if (f === 'path1' || f === 'path2') ensureAg()[f] = cleanPath(v);
             else if (f === 'displayPath') { const pp = splitDisplayPath(v); if (pp[0]) { const t = ensureAg(); t.path1 = pp[0]; t.path2 = pp[1]; } }
@@ -2197,6 +2330,10 @@
         if (rowGroups) ag = prevAg;
         return;
       }
+      if (rows.every(r => settingLabel(r[0] || '') && r.slice(1).some(Boolean))) {
+        rows.forEach(r => kvApply(norm(r[0]), r.slice(1).find(Boolean)));
+        return;
+      }
       skip(rows[0].filter(Boolean).join(' | '), 'table the tool did not recognise', { kind: 'table' });
     };
 
@@ -2255,9 +2392,17 @@
   }
 
   const fmtNum = n => (Math.round(n * 100) / 100).toLocaleString('en-US');
+  // the pins of the headlines and descriptions an ad keeps (15 and 4)
+  const keptPins = a => {
+    const out = {};
+    const pins = a.pins || {};
+    a.headlines.slice(0, 15).forEach(h => { const k = pinKey('h', h); if (pins[k]) out[k] = pins[k]; });
+    a.descriptions.slice(0, 4).forEach(d => { const k = pinKey('d', d); if (pins[k]) out[k] = pins[k]; });
+    return out;
+  };
 
   function buildModel(res, sourceName) {
-    ['campaignNegatives', 'campaignNegNames', 'campaignLocations', 'campaignBudgets', 'campaignBids', 'campaignUrls', 'campaignLangs', 'campaignMaxCpc'].forEach(f => { res[f] = res[f] || {}; });
+    ['campaignNegatives', 'campaignNegNames', 'campaignLocations', 'campaignBudgets', 'campaignBids', 'campaignUrls', 'campaignLangs', 'campaignMaxCpc', 'campaignExcluded'].forEach(f => { res[f] = res[f] || {}; });
     const model = {
       source: sourceName || '', title: res.title, campaigns: [], adGroups: [], accountNegatives: res.accountNegatives.slice(),
       notes: [], skipped: [], detected: res.settings
@@ -2280,7 +2425,8 @@
       if (res.campaignNegatives[k]) usedNegKeys.add(k);
       const c = { id: nid('c'), name, budget: b ? b.daily : null, budgetBasis: b ? b.basis : null, negatives: (res.campaignNegatives[k] || []).slice(), locations: res.campaignLocations[k] ? res.campaignLocations[k].slice() : null, finalUrl: res.campaignUrls[k] || '',
         bidStrategy: res.campaignBids[k] ? res.campaignBids[k].bid : null, targetCpa: res.campaignBids[k] ? res.campaignBids[k].targetCpa : null,
-        languages: res.campaignLangs[k] ? res.campaignLangs[k].v.slice() : null };
+        languages: res.campaignLangs[k] ? res.campaignLangs[k].v.slice() : null,
+        excluded: res.campaignExcluded[k] ? res.campaignExcluded[k].slice() : null };
       budgetNote(c, b);
       model.campaigns.push(c); byKey.set(k, c);
       return c;
@@ -2321,6 +2467,7 @@
         path1: path1 || p1, path2: path2 || (path1 ? '' : p2),
         maxCpc: a.maxCpc != null ? a.maxCpc : (props && props.maxCpc != null ? props.maxCpc : null),
         matchType: a.matchType || null,
+        pins: keptPins(a),
         auto: !!a.auto
       };
       agIds.set(a, g.id);
@@ -2344,6 +2491,26 @@
     const docIx = new Map(model.adGroups.map((g, i) => [g, i]));
     model.adGroups.sort((a, b) => (ci(a.campaignId) - ci(b.campaignId)) || (order(a) - order(b)) || (docIx.get(a) - docIx.get(b)));
     listed.filter(L => !L.used).forEach(L => model.notes.push({ level: 'warn', msg: '"' + L.n + '" is listed under ' + L.c.name + ' but has no ad group section in the doc.' }));
+    // "One ad per ad group, used in both campaigns": an ad group with keywords but no ad takes the ad of the
+    // same-named ad group in another campaign, when there is exactly one such ad
+    const shared = new Map();
+    model.adGroups.forEach(g => {
+      if (g.headlines.length || g.descriptions.length) return;
+      const donors = model.adGroups.filter(x => x !== g && x.campaignId !== g.campaignId && key(x.name) === key(g.name) && (x.headlines.length || x.descriptions.length));
+      const sig = x => JSON.stringify([x.headlines, x.descriptions]);
+      if (!donors.length || donors.some(x => sig(x) !== sig(donors[0]))) return;
+      const d = donors[0];
+      g.headlines = d.headlines.slice(); g.descriptions = d.descriptions.slice(); g.pins = Object.assign({}, d.pins);
+      const [p1, p2] = suggestPaths(g.name);
+      if (g.path1 === p1 && g.path2 === p2) { g.path1 = d.path1; g.path2 = d.path2; }
+      if (!g.finalUrl) g.finalUrl = d.finalUrl;
+      const nk = d.campaignId + '>' + g.campaignId;
+      shared.set(nk, (shared.get(nk) || []).concat(g.name));
+    });
+    shared.forEach((names, nk) => {
+      const [from, to] = nk.split('>').map(id => (model.campaigns.find(c => c.id === id) || {}).name);
+      model.notes.push({ level: 'info', msg: to + ': ' + (names.length === 1 ? names[0] + ' has' : names.length + ' ad groups have') + ' no ad of ' + (names.length === 1 ? 'its' : 'their') + ' own in the doc, so ' + (names.length === 1 ? 'it uses the ad' : 'they use the ads') + ' of the same ad groups in ' + from + '.' });
+    });
     model.adGroups.forEach(g => {
       const a = res.adGroups.find(x => agIds.get(x) === g.id);
       if (a && a.headlines.length > 15) model.notes.push({ level: 'warn', msg: g.name + ': doc has ' + a.headlines.length + ' headlines. Microsoft allows 15, so the first 15 were kept. The rest are in the import report.' });
@@ -2534,7 +2701,15 @@
     'Greece': 'AthensBuckarestIstanbul', 'Romania': 'Bucharest', 'Egypt': 'Cairo', 'Israel': 'Jerusalem', 'South Africa': 'HararePretoria', 'Kenya': 'Nairobi', 'Nigeria': 'WestCentralAfrica',
     'Singapore': 'KualaLumpurSingapore', 'Malaysia': 'KualaLumpurSingapore', 'Hong Kong': 'BeijingChongqingHongKongUrumqi', 'Taiwan': 'Taipei', 'Japan': 'OsakaSapporoTokyo',
     'South Korea': 'Seoul', 'Thailand': 'BangkokHanoiJakarta', 'Vietnam': 'BangkokHanoiJakarta', 'New Zealand': 'AucklandWellington', 'Colombia': 'BogotaLimaQuito',
-    'Peru': 'BogotaLimaQuito', 'Ecuador': 'BogotaLimaQuito', 'Argentina': 'BuenosAiresGeorgetown', 'Morocco': 'CasablancaMonrovia', 'Iraq': 'Baghdad'
+    'Peru': 'BogotaLimaQuito', 'Ecuador': 'BogotaLimaQuito', 'Argentina': 'BuenosAiresGeorgetown', 'Morocco': 'CasablancaMonrovia', 'Iraq': 'Baghdad',
+    // Africa: West Central Africa is UTC+1, Harare and Pretoria UTC+2, Nairobi UTC+3, Monrovia UTC
+    'Cameroon': 'WestCentralAfrica', 'Angola': 'WestCentralAfrica', 'Republic of the Congo': 'WestCentralAfrica', 'Gabon': 'WestCentralAfrica',
+    'Algeria': 'WestCentralAfrica', 'Tunisia': 'WestCentralAfrica', 'Benin': 'WestCentralAfrica', 'Niger': 'WestCentralAfrica', 'Chad': 'WestCentralAfrica',
+    'Zambia': 'HararePretoria', 'Zimbabwe': 'HararePretoria', 'Botswana': 'HararePretoria', 'Namibia': 'HararePretoria', 'Malawi': 'HararePretoria',
+    'Mozambique': 'HararePretoria', 'Rwanda': 'HararePretoria', 'Burundi': 'HararePretoria', 'Lesotho': 'HararePretoria', 'Eswatini': 'HararePretoria',
+    'Tanzania': 'Nairobi', 'Uganda': 'Nairobi', 'Ethiopia': 'Nairobi', 'Somalia': 'Nairobi', 'Djibouti': 'Nairobi', 'Eritrea': 'Nairobi', 'Madagascar': 'Nairobi',
+    'Liberia': 'CasablancaMonrovia', 'Ghana': 'CasablancaMonrovia', 'Sierra Leone': 'CasablancaMonrovia', 'The Gambia': 'CasablancaMonrovia', 'Senegal': 'CasablancaMonrovia',
+    'Guinea': 'CasablancaMonrovia', 'Mali': 'CasablancaMonrovia', "Cote d'Ivoire": 'CasablancaMonrovia', 'Togo': 'CasablancaMonrovia', 'Burkina Faso': 'CasablancaMonrovia'
   };
   const TZ_REGION = {
     PacificTimeUSCanadaTijuana: ['California', 'Washington', 'Oregon', 'Nevada', 'British Columbia'],
@@ -2672,6 +2847,11 @@
     : { bid: S.bidStrategy, targetCpa: S.targetCpa, own: false };
   // The places a campaign targets: its own from the doc, or the account default ([] with "All countries")
   const campaignLocations = (c, S) => c && c.locations && c.locations.length ? c.locations : (S.allLocations ? [] : (S.locations || []));
+  // the places a campaign excludes: its own from the doc, or the account default
+  const campaignExclusions = (c, S) => c && c.excluded && c.excluded.length ? c.excluded : (S.excludedLocations || []);
+  // Microsoft pins a headline to position 1-3 and a description to position 1-2
+  const PIN_MAX = { h: 3, d: 2 };
+  const pinOf = (g, type, text) => { const p = g.pins && g.pins[pinKey(type, text)]; return p && p <= PIN_MAX[type] ? p : null; };
   const hostOf = u => { try { return new URL(u).hostname; } catch (e) { return ''; } };
 
   function validate(model, S, today) {
@@ -2707,6 +2887,12 @@
         else W({ scope: 'campaign', id: c.id, field: 'locations' }, msg + ' Add the places in Editor before you enable it.');
       }
     });
+    const exMissing = new Set();
+    used.forEach(c => campaignExclusions(c, S).forEach(l => { if (!msLocationId(l, S)) exMissing.add(l.name); }));
+    if (exMissing.size) W({ scope: 'settings', field: 'locations' }, 'Excluded ' + (exMissing.size === 1 ? 'place "' + [...exMissing][0] + '" has' : 'places (' + [...exMissing].slice(0, 5).join('; ') + (exMissing.size > 5 ? '; and ' + (exMissing.size - 5) + ' more' : '') + ') have') + ' no Microsoft location ID, so the file cannot exclude ' + (exMissing.size === 1 ? 'it' : 'them') + '. Add the IDs under Locations, or exclude them in Editor after import.');
+    const sfx = S.finalUrlSuffix || '';
+    if (sfx && (/^[?&#]/.test(sfx) || /\s/.test(sfx))) E({ scope: 'settings', field: 'finalUrlSuffix' }, 'The final URL suffix cannot start with ?, & or # or contain spaces. Write it like src=bing&kwd={keyword}.');
+    if (/\{(?:ignore|lpurl|escapedlpurl|unescapedlpurl)\}/i.test(sfx)) E({ scope: 'settings', field: 'finalUrlSuffix' }, 'The final URL suffix cannot use {lpurl} or {ignore}; those belong in a tracking template.');
     const noId = [...missing.keys()];
     if (noId.length) W({ scope: 'settings', field: 'locations' }, (noId.length === 1 ? '"' + noId[0] + '" has' : noId.length + ' locations have') + ' no Microsoft location ID' + (noId.length > 1 ? ' (' + noId.slice(0, 4).join('; ') + (noId.length > 4 ? '; and ' + (noId.length - 4) + ' more' : '') + ')' : '') + ', so ' + (noId.length === 1 ? 'it is' : 'they are') + ' left out of the file. Add the IDs under Locations, or add the places in Editor after import.');
 
@@ -2767,6 +2953,13 @@
         if (/!/.test(t)) W(oi, label + ': headline ' + (i + 1) + ' has an exclamation mark. Microsoft\'s ad style rules can reject it in a headline; a description is the safer place.');
         copyChecks(t, oi, label, 'headline ' + (i + 1));
       });
+      // pins: every position needs a headline or description that may show there
+      [['h', hs, 3, 'headline'], ['d', ds, 2, 'description']].forEach(([t, list, n, word]) => {
+        if (list.length < (t === 'h' ? 3 : 2)) return;
+        for (let p = 1; p <= n; p++) {
+          if (!list.some(x => { const q = pinOf(g, t, x); return !q || q === p; })) E(Object.assign({ field: t }, o), label + ': no ' + word + ' can show in position ' + p + ', because every ' + word + ' is pinned elsewhere. Unpin one or pin one to position ' + p + '.');
+        }
+      });
       const seen = new Set();
       hs.forEach(h => { const k = h.toLowerCase(); if (seen.has(k)) E(Object.assign({ field: 'h' }, o), label + ': duplicate headline "' + h + '".'); seen.add(k); });
       const seenD = new Set();
@@ -2816,10 +3009,21 @@
       return h >= 3 && d >= 2 && (h < 8 || d < 4);
     });
     if (thin.length) W({ scope: 'doc' }, (thin.length === 1 ? '1 ad has' : thin.length + ' ads have') + ' fewer than 8 headlines or 4 descriptions (' + thin.slice(0, 4).map(g => g.name).join(', ') + (thin.length > 4 ? ' and ' + (thin.length - 4) + ' more' : '') + '). More unique headlines and all 4 descriptions give Microsoft more combinations to test.');
+    // the same keyword in two ad groups competes only within one campaign, or across campaigns that reach the same places
+    const placesOf = c => { const l = campaignLocations(c, S); return l.length ? new Set(l.map(x => x.name.toLowerCase())) : null; };
+    const overlap = (a, b) => {
+      if (a.campaignId === b.campaignId) return true;
+      const pa = placesOf(camp(a.campaignId)), pb = placesOf(camp(b.campaignId));
+      return !pa || !pb || [...pa].some(x => pb.has(x));
+    };
+    const agLabel = (g, all) => all.some(x => x !== g && x.name === g.name) ? g.name + ' (' + ((camp(g.campaignId) || {}).name || '') + ')' : g.name;
     kwIndex.forEach((gs, ix) => {
       const uniq = [...new Set(gs)];
       const kw = ix.split('|')[0];
-      if (uniq.length > 1) uniq.forEach(g => W({ scope: 'adgroup', id: g.id, field: 'keywords', dup: kw }, '"' + kw + '" is in ' + uniq.map(x => x.name).join(' and ') + '. The ad groups will compete for the same searches.'));
+      uniq.forEach(g => {
+        const group = uniq.filter(x => x === g || overlap(g, x));
+        if (group.length > 1) W({ scope: 'adgroup', id: g.id, field: 'keywords', dup: kw }, '"' + kw + '" is in ' + group.map(x => agLabel(x, uniq)).join(' and ') + '. The ad groups will compete for the same searches.');
+      });
     });
     return { errors, warnings };
   }
@@ -2829,14 +3033,17 @@
   const BID_TYPE = { maxclicks: 'MaxClicks', maxconv: 'MaxConversions', tcpa: 'TargetCpa', ecpc: 'EnhancedCpc' };
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
   const HEADERS = ['Type', 'Status', 'Id', 'Parent Id', 'Campaign', 'Ad Group', 'Time Zone', 'Budget', 'Budget Type', 'Campaign Type', 'Language',
-    'Bid Strategy Type', 'Bid Strategy MaxCpc', 'Bid Strategy TargetCpa', 'Start Date', 'Network Distribution', 'Cpc Bid', 'Keyword', 'Match Type',
-    'Target', 'Final Url', 'Path 1', 'Path 2', 'Headline', 'Description', 'Name'];
+    'Bid Strategy Type', 'Bid Strategy MaxCpc', 'Bid Strategy TargetCpa', 'Final Url Suffix', 'Start Date', 'Network Distribution', 'Ad Rotation', 'Cpc Bid',
+    'Keyword', 'Match Type', 'Target', 'Final Url', 'Path 1', 'Path 2', 'Headline', 'Description', 'Name'];
   const ALWAYS = new Set(['Type', 'Status', 'Id', 'Parent Id', 'Campaign', 'Ad Group', 'Name']);
   const num = v => { const n = +v; return isFinite(n) && n > 0 ? String(Math.round(n * 100) / 100) : ''; };
   // "2026-11-05" -> "11/5/2026", the form Microsoft's bulk examples use
   const bulkDate = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ''); return m ? (+m[2]) + '/' + (+m[3]) + '/' + m[1] : ''; };
-  // Headlines and descriptions go in as a JSON list of text assets
-  const assets = list => JSON.stringify(list.map(text => ({ text })));
+  // Headlines and descriptions go in as a JSON list of text assets, with any pin as "pinnedField": "Headline1"
+  const assets = (g, type, list) => JSON.stringify(list.map(text => {
+    const p = pinOf(g, type, text);
+    return p ? { text, pinnedField: (type === 'h' ? 'Headline' : 'Description') + p } : { text };
+  }));
 
   function exportRows(model, S) {
     const raw = [];
@@ -2855,11 +3062,15 @@
         'Time Zone': S.timeZone || '', Budget: num(c.budget), 'Budget Type': 'DailyBudgetStandard', 'Campaign Type': 'Search',
         Language: msLanguages(c.languages && c.languages.some(l => MS_LANGS[l]) ? c.languages : S.languages),
         'Bid Strategy Type': BID_TYPE[bid.bid] || 'EnhancedCpc', 'Bid Strategy TargetCpa': bid.bid === 'tcpa' ? num(bid.targetCpa) : '',
-        'Bid Strategy MaxCpc': automated ? num(S.bidCap) : ''
+        'Bid Strategy MaxCpc': automated ? num(S.bidCap) : '', 'Final Url Suffix': (S.finalUrlSuffix || '').trim()
       });
       campaignLocations(c, S).forEach(L => {
         const id = msLocationId(L, S);
         if (id) row({ kind: 'location', Type: 'Campaign Location Criterion', Status: 'Active', 'Parent Id': cid, Campaign: cn, Target: id, _place: L.name });
+      });
+      campaignExclusions(c, S).forEach(L => {
+        const id = msLocationId(L, S);
+        if (id) row({ kind: 'location', Type: 'Campaign Negative Location Criterion', 'Parent Id': cid, Campaign: cn, Target: id, _place: L.name });
       });
       row({ kind: 'location', Type: 'Campaign Location Intent Criterion', Status: 'Active', 'Parent Id': cid, Campaign: cn, Target: S.presenceOnly ? 'PeopleIn' : 'PeopleInOrSearchingForOrViewingPages' });
       const negs = [];
@@ -2870,7 +3081,7 @@
         const gid = String(--ref);
         row({
           kind: 'adgroup', Type: 'Ad Group', Status: 'Active', Id: gid, 'Parent Id': cid, Campaign: cn, 'Ad Group': gn, 'Start Date': bulkDate(S.startDate),
-          'Network Distribution': S.searchPartners ? 'OwnedAndOperatedAndSyndicatedSearch' : 'OwnedAndOperatedOnly',
+          'Network Distribution': S.searchPartners ? 'OwnedAndOperatedAndSyndicatedSearch' : 'OwnedAndOperatedOnly', 'Ad Rotation': S.adRotation || '',
           'Cpc Bid': bid.bid === 'ecpc' ? num(+g.maxCpc > 0 ? g.maxCpc : S.maxCpc) : ''
         });
         g.keywords.forEach(k => matchTypesFor(k, g.matchType || S.matchType).forEach(mt => row({ kind: 'keyword', Type: 'Keyword', Status: 'Active', 'Parent Id': gid, Campaign: cn, 'Ad Group': gn, Keyword: k.text, 'Match Type': cap(mt) })));
@@ -2883,7 +3094,7 @@
         row({
           kind: 'ad', Type: 'Responsive Search Ad', Status: 'Active', 'Parent Id': gid, Campaign: cn, 'Ad Group': gn,
           'Final Url': (g.finalUrl || S.finalUrl || '').trim(), 'Path 1': g.path1 || '', 'Path 2': g.path2 || '',
-          Headline: assets(g.headlines.map(norm).filter(Boolean).slice(0, 15)), Description: assets(g.descriptions.map(norm).filter(Boolean).slice(0, 4))
+          Headline: assets(g, 'h', g.headlines.map(norm).filter(Boolean).slice(0, 15)), Description: assets(g, 'd', g.descriptions.map(norm).filter(Boolean).slice(0, 4))
         });
       });
     });
@@ -2897,7 +3108,8 @@
     model.campaigns.forEach(c => {
       if (!model.adGroups.some(g => g.campaignId === c.id)) return;
       const places = campaignLocations(c, S).filter(l => !msLocationId(l, S)).map(l => l.name);
-      if (places.length) out.push({ campaign: c.name.trim(), places });
+      const excluded = campaignExclusions(c, S).filter(l => !msLocationId(l, S)).map(l => l.name);
+      if (places.length || excluded.length) out.push({ campaign: c.name.trim(), places, excluded });
     });
     return out;
   }
@@ -2916,7 +3128,8 @@
     norm, key, labelKey, sim, htmlToBlocks, textToBlocks, csvToRows, rowsToBlocks, classify, tableShape, parseBlocks, buildModel, parseBlocksToModel,
     parseHTML, parseText, parseSheets, validate, exportRows, toCSV, suggestPaths, COUNTRIES, LANGS, MS_LANGS, findCountry, parseLocations,
     parseBudget, adLen, matchSetting, sectionLabel, kwToLine, linesToKw, matchTypesFor, negBlocks, negMatch, nid, parseKeyword, deriveName, blocksToText, tidyCampaign,
-    settingFrom, TIME_ZONES, guessTimeZone, msLanguages, msLocationId, locKey, geoIndex, geoLookup, missingLocations, MS_COUNTRY_IDS, platformOf
+    settingFrom, TIME_ZONES, guessTimeZone, msLanguages, msLocationId, locKey, geoIndex, geoLookup, missingLocations, MS_COUNTRY_IDS, platformOf,
+    pinKey, pinPosition, inlinePin
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CBEngine = api;

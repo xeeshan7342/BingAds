@@ -202,3 +202,23 @@ test('AI with an API key: Haiku 4.5 is the cheapest option and gets a request it
   assert.equal(req.output_config.effort, undefined);
   assert.equal(req.output_config.format.type, 'json_schema');
 });
+
+test('AI: pins, excluded places, the URL suffix and ad rotation come through', () => {
+  const answer = {
+    title: 't', account_negative_keywords: [], unused_text: [],
+    campaigns: [{ name: 'C', budget_amount: 30, budget_period: 'daily', locations: ['Canada'], final_url: '', bid_strategy: 'not_stated', target_cpa: null, negative_keywords: [],
+      ad_groups: [{ name: 'A', keywords: [{ text: 'a b', match_type: 'default' }], negative_keywords: [], headlines: ['Brand Name', 'Two', 'Three'], descriptions: ['Desc one here.', 'Desc two here.'],
+        pins: [{ text: 'Brand Name', position: 1 }, { text: 'Desc one here.', position: 2 }], final_url: 'example.com', path1: '', path2: '' }] }],
+    settings: { final_url: '', bid_strategy: 'not_stated', target_cpa: null, max_cpc: null, default_match_type: 'not_stated', locations: [], presence_only: 'not_stated', languages: [],
+      search_partners: 'not_stated', start_date: '', excluded_locations: ['Peru', 'Bolivia'], final_url_suffix: '?src=bing', ad_rotation: 'rotate_evenly' }
+  };
+  const m = E.buildModel(AI.toResult(answer), 'x');
+  assert.deepEqual(m.adGroups[0].pins, { 'h|brand name': 1, 'd|desc one here.': 2 });
+  assert.deepEqual(m.detected.excludedLocations.map(l => l.name), ['Peru', 'Bolivia']);
+  assert.equal(m.detected.finalUrlSuffix, 'src=bing');
+  assert.equal(m.detected.adRotation, 'RotateAdsEvenly');
+  // an older answer without the new fields still reads
+  const old = JSON.parse(JSON.stringify(answer));
+  delete old.campaigns[0].ad_groups[0].pins; delete old.settings.excluded_locations; delete old.settings.final_url_suffix; delete old.settings.ad_rotation;
+  assert.equal(E.buildModel(AI.toResult(old), 'x').adGroups.length, 1);
+});

@@ -21,8 +21,9 @@
 
   const MT_LABEL = { phrase: 'Phrase', exact: 'Exact', broad: 'Broad', 'phrase+exact': 'Phrase + Exact' };
   const DEFAULTS = {
-    finalUrl: '', matchType: 'phrase', bidStrategy: 'maxclicks', targetCpa: '', maxCpc: '', bidCap: '', timeZone: '',
-    locations: [], allLocations: false, presenceOnly: true, languages: ['en'], searchPartners: false, campaignStatus: 'Paused', startDate: ''
+    finalUrl: '', finalUrlSuffix: '', matchType: 'phrase', bidStrategy: 'maxclicks', targetCpa: '', maxCpc: '', bidCap: '', timeZone: '',
+    locations: [], excludedLocations: [], allLocations: false, presenceOnly: true, languages: ['en'], searchPartners: false, adRotation: '',
+    campaignStatus: 'Paused', startDate: ''
   };
   // the ad languages Microsoft offers, in the tool's display order
   const MS_LANG_LIST = E.LANGS.filter(([c]) => E.MS_LANGS[c]);
@@ -62,6 +63,21 @@
     $('#startDate').min = todayISO();
 
     $('#finalUrl').addEventListener('input', e => { S.finalUrl = e.target.value.trim(); updateAllSerps(); refresh(); });
+    $('#finalUrlSuffix').addEventListener('input', e => { S.finalUrlSuffix = e.target.value.trim(); refresh(); });
+    $('#adRotation').addEventListener('change', e => { S.adRotation = e.target.value; refresh(); });
+    const addExcluded = () => {
+      const inp = $('#exCustom'); const v = E.norm(inp.value); if (!v) return;
+      const st = E.settingFrom('Excluded locations', v);
+      (st ? st.v : []).forEach(loc => { if (!S.excludedLocations.some(l => l.name.toLowerCase() === loc.name.toLowerCase())) S.excludedLocations.push(loc); });
+      if (!st) toast('That did not read as a place.', true);
+      inp.value = ''; matchGeo(); renderLocations(); refresh();
+    };
+    $('#exCustomAdd').addEventListener('click', addExcluded);
+    $('#exCustom').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addExcluded(); } });
+    $('#exChips').addEventListener('click', e => {
+      const b = e.target.closest('button[data-ex]'); if (!b) return;
+      S.excludedLocations.splice(+b.dataset.ex, 1); renderLocations(); refresh();
+    });
     $$('input[name="matchType"]').forEach(r => r.addEventListener('change', e => {
       S.matchType = e.target.value;
       $$('select[data-f="matchType"] option[value=""]').forEach(o => { o.textContent = 'Account default (' + MT_LABEL[S.matchType] + ')'; });
@@ -88,7 +104,7 @@
     $('#locIdList').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset.locname) { e.preventDefault(); commitLocId(e.target); } });
     $('#geoIn').addEventListener('change', e => { loadGeoFile(e.target.files[0]); e.target.value = ''; });
     $('#missingCopy').addEventListener('click', () => {
-      const text = E.missingLocations(state.model, S).map(m => m.campaign + ': ' + m.places.join('; ')).join('\n');
+      const text = E.missingLocations(state.model, S).map(m => m.campaign + (m.places.length ? '\n  Target: ' + m.places.join('; ') : '') + (m.excluded.length ? '\n  Exclude: ' + m.excluded.join('; ') : '')).join('\n');
       let p;
       try { p = navigator.clipboard.writeText(text); } catch (err) { p = Promise.reject(err); }
       p.then(() => toast('Copied the places to add in Editor.'), () => showFallback(text, 'list'));
@@ -160,10 +176,10 @@
   const campBid = c => (c && c.bidStrategy) || S.bidStrategy;
   const idsS = () => Object.assign({}, S, { locIds: mem.locIds() });
   // a location chip shows its Microsoft location ID, or that it still needs one
-  const locChip = (l, removeIx) => {
+  const locChip = (l, removeIx, attr) => {
     const id = E.msLocationId(l, idsS());
-    return '<span class="chip' + (id ? '' : ' need') + '">' + esc(l.name) + (id ? ' <span class="mono" title="Microsoft location ID">' + esc(id) + '</span>' : ' <span class="mono" title="No Microsoft location ID yet">needs ID</span>')
-      + (removeIx != null ? '<button type="button" data-loc="' + removeIx + '" aria-label="Remove ' + esc(l.name) + '">&times;</button>' : '') + '</span>';
+    return '<span class="chip' + (id ? '' : ' need') + (attr === 'ex' ? ' ex' : '') + '">' + esc(l.name) + (id ? ' <span class="mono" title="Microsoft location ID">' + esc(id) + '</span>' : ' <span class="mono" title="No Microsoft location ID yet">needs ID</span>')
+      + (removeIx != null ? '<button type="button" data-' + (attr || 'loc') + '="' + removeIx + '" aria-label="Remove ' + esc(l.name) + '">&times;</button>' : '') + '</span>';
   };
   // every place the export would target: the account defaults and each campaign's own
   function placesInUse() {
@@ -171,13 +187,17 @@
     const add = l => { if (l && l.name && !out.some(x => x.name.toLowerCase() === l.name.toLowerCase())) out.push(l); };
     if (!S.allLocations) S.locations.forEach(add);
     state.model.campaigns.forEach(c => (c.locations || []).forEach(add));
+    (S.excludedLocations || []).forEach(add);
+    state.model.campaigns.forEach(c => (c.excluded || []).forEach(add));
     return out;
   }
   function renderLocations() {
     const chips = [];
     if (S.allLocations) chips.push('<span class="chip">All countries<button type="button" data-loc="all" aria-label="Remove all countries">&times;</button></span>');
     S.locations.forEach((l, i) => chips.push(locChip(l, i)));
-    $('#locChips').innerHTML = chips.length ? chips.join('') : '<span class="hint">No locations yet. Add one, or pick All countries.</span>';
+    const ownLocs = state.model.campaigns.length && state.model.campaigns.every(c => c.locations && c.locations.length);
+    $('#locChips').innerHTML = chips.length ? chips.join('') : '<span class="hint">' + (ownLocs ? 'Each campaign has its own locations from the doc. Add places here only as a default for new campaigns.' : 'No locations yet. Add one, or pick All countries.') + '</span>';
+    $('#exChips').innerHTML = (S.excludedLocations || []).length ? S.excludedLocations.map((l, i) => locChip(l, i, 'ex')).join('') : '<span class="hint">None</span>';
     const places = placesInUse();
     $('#locIdBox').hidden = !places.length;
     $('#locIdList').innerHTML = places.map((l, i) => {
@@ -195,7 +215,7 @@
     $('#langs').innerHTML = shown.map(([c, n]) => '<label class="check"><input type="checkbox" class="lang" value="' + esc(c) + '"' + (S.languages.includes(c) ? ' checked' : '') + '><span>' + esc(n) + '</span></label>').join('');
   }
   function syncSettingsUI() {
-    $('#finalUrl').value = S.finalUrl;
+    $('#finalUrl').value = S.finalUrl; $('#finalUrlSuffix').value = S.finalUrlSuffix || ''; $('#adRotation').value = S.adRotation || '';
     const mt = $('input[name="matchType"][value="' + S.matchType + '"]'); if (mt) mt.checked = true;
     $('#bidStrategy').value = S.bidStrategy; syncBidRows();
     $('#targetCpa').value = S.targetCpa; $('#maxCpc').value = S.maxCpc; $('#bidCap').value = S.bidCap || '';
@@ -215,6 +235,9 @@
     if (d.finalUrl) { S.finalUrl = d.finalUrl; picked.push('final URL'); }
     if (d.locations && d.locations.length) { S.locations = clone(d.locations); S.allLocations = false; picked.push('locations'); }
     if (d.presenceOnly != null) { S.presenceOnly = d.presenceOnly; picked.push('location option'); }
+    if (d.excludedLocations && d.excludedLocations.length) { S.excludedLocations = clone(d.excludedLocations); picked.push('excluded places'); }
+    if (d.finalUrlSuffix) { S.finalUrlSuffix = d.finalUrlSuffix; picked.push('final URL suffix'); }
+    if (d.adRotation) { S.adRotation = d.adRotation; picked.push('ad rotation'); }
     if (d.languages) { S.languages = d.languages.slice(); picked.push('languages'); }
     if (d.bidStrategy) { S.bidStrategy = d.bidStrategy; picked.push('bid strategy'); }
     if (d.targetCpa) { S.targetCpa = String(d.targetCpa); picked.push('target CPA'); }
@@ -375,6 +398,14 @@
   /* ---------------- tree ---------------- */
   const campOptions = sel => state.model.campaigns.map(c => '<option value="' + esc(c.id) + '"' + (c.id === sel ? ' selected' : '') + '>' + esc(c.name || 'Untitled campaign') + '</option>').join('');
 
+  // a pinned headline always shows in its position (1-3); a pinned description in position 1 or 2
+  const pinOf = (g, f, v) => (g.pins || {})[E.pinKey(f, v)] || '';
+  function movePin(g, f, from, to) {
+    const p = pinOf(g, f, from);
+    if (!p) return;
+    delete g.pins[E.pinKey(f, from)];
+    if (E.norm(to)) g.pins[E.pinKey(f, to)] = p;
+  }
   function copyRow(g, f, i, v) {
     const max = f === 'h' ? 30 : 90;
     const len = E.adLen(v);
@@ -383,7 +414,10 @@
     const field = f === 'h'
       ? '<input id="' + id + '" data-f="h" data-i="' + i + '" value="' + esc(v) + '" aria-label="' + label + '" autocomplete="off">'
       : '<textarea id="' + id + '" data-f="d" data-i="' + i + '" rows="2" aria-label="' + label + '">' + esc(v) + '</textarea>';
-    return '<div class="copy-row"><span class="ix mono">' + (i + 1) + '</span>' + field +
+    const pin = pinOf(g, f, v);
+    const pinSel = '<select class="pin' + (pin ? ' on' : '') + '" data-pin="' + f + '" data-i="' + i + '" aria-label="Pin ' + label.toLowerCase() + '" title="Pin to a position">'
+      + [['', 'Any'], [1, 'Pin 1'], [2, 'Pin 2']].concat(f === 'h' ? [[3, 'Pin 3']] : []).map(([pv, pl]) => '<option value="' + pv + '"' + (String(pin) === String(pv) ? ' selected' : '') + '>' + pl + '</option>').join('') + '</select>';
+    return '<div class="copy-row"><span class="ix mono">' + (i + 1) + '</span>' + field + pinSel +
       '<span class="cnt mono' + (len > max ? ' over' : '') + '" data-cnt="' + id + '">' + len + '/' + max + '</span>' +
       '<button type="button" class="x" data-act="del-' + f + '" data-i="' + i + '" aria-label="Remove ' + label.toLowerCase() + '">&times;</button></div>';
   }
@@ -391,9 +425,21 @@
   function hostOf(u) { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return 'example.com'; } }
   // the preview shows keyword insertion with its default text, as Microsoft does when no keyword fits
   const shown = t => E.norm(t).replace(/\{\s*keyword\s*:\s*([^}]*)\}/gi, '$1');
+  // the lines an ad shows first: each position takes a line pinned there, or the next unpinned line
+  function byPosition(g, f, list, n) {
+    const lines = list.filter(x => E.norm(x));
+    const free = lines.filter(x => !pinOf(g, f, x));
+    const out = [];
+    for (let p = 1; p <= n; p++) {
+      const pinned = lines.find(x => +pinOf(g, f, x) === p);
+      const pick = pinned || free.shift();
+      if (pick) out.push(pick);
+    }
+    return out.map(shown);
+  }
   function serpInner(g) {
-    const hs = g.headlines.map(shown).filter(Boolean).slice(0, 3);
-    const ds = g.descriptions.map(shown).filter(Boolean).slice(0, 2);
+    const hs = byPosition(g, 'h', g.headlines, 3);
+    const ds = byPosition(g, 'd', g.descriptions, 2);
     const host = hostOf(g.finalUrl || S.finalUrl);
     const path = [g.path1, g.path2].filter(Boolean).join('/');
     return '<div class="serp-top"><b>Ad</b></div>' +
@@ -463,6 +509,7 @@
       '<div class="camp-extra">' +
         (c.languages && c.languages.length ? '<div class="loc-override"><span>Languages for this campaign:</span>' + c.languages.map(l => '<span class="chip">' + esc(langName(l)) + '</span>').join('') + '<button type="button" class="btn btn-ghost btn-sm" data-act="clear-clang">Use account defaults</button></div>' : '') +
         (locs ? '<div class="loc-override"><span>Locations for this campaign:</span>' + locs.map(l => locChip(l, null)).join('') + '<button type="button" class="btn btn-ghost btn-sm" data-act="clear-cloc">Use account defaults</button></div>' : '') +
+        (c.excluded && c.excluded.length ? '<div class="loc-override"><span>Excluded for this campaign:</span>' + c.excluded.map(l => locChip(l, null, 'ex')).join('') + '</div>' : '') +
         '<div class="camp-bid"><label class="lbl" for="cbid-' + c.id + '">Bidding</label><select id="cbid-' + c.id + '" data-cf="bid">' +
           [['', 'Account default (' + BID_LABEL[S.bidStrategy] + ')']].concat(Object.keys(BID_LABEL).map(k => [k, BID_LABEL[k]]))
             .map(([v, l]) => '<option value="' + v + '"' + ((c.bidStrategy || '') === v ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select>' +
@@ -538,7 +585,9 @@
       else if (f === 'keywords') { g.keywords = E.linesToKw(t.value); $('[data-kwcount]', gEl).textContent = g.keywords.length; }
       else if (f === 'negatives') { g.negatives = E.linesToKw(t.value); }
       else if (f === 'h' || f === 'd') {
-        const i = +t.dataset.i; (f === 'h' ? g.headlines : g.descriptions)[i] = t.value;
+        const i = +t.dataset.i; const list = f === 'h' ? g.headlines : g.descriptions;
+        movePin(g, f, list[i], t.value);
+        list[i] = t.value;
         updateCounter(f + '-' + g.id + '-' + i, E.adLen(t.value), f === 'h' ? 30 : 90); updateSerp(g);
       }
       refresh();
@@ -550,6 +599,16 @@
         c.bidStrategy = t.value || null; if (c.bidStrategy !== 'tcpa') c.targetCpa = null;
         state.dirty = true; renderTree(); syncBidRows(); refresh();
         const f = $('#ctcpa-' + c.id); if (f) f.focus();
+        return;
+      }
+      if (t.dataset.pin) {
+        const g = findG(t.closest('[data-gid]').dataset.gid);
+        const f = t.dataset.pin; const text = (f === 'h' ? g.headlines : g.descriptions)[+t.dataset.i] || '';
+        g.pins = g.pins || {};
+        if (!E.norm(text)) { t.value = ''; toast('Write the text before pinning it.', true); return; }
+        if (t.value) g.pins[E.pinKey(f, text)] = +t.value; else delete g.pins[E.pinKey(f, text)];
+        t.classList.toggle('on', !!t.value);
+        state.dirty = true; updateSerp(g); refresh();
         return;
       }
       if (t.dataset.f === 'matchType') {
@@ -583,7 +642,7 @@
       const cEl = b.closest('[data-cid]');
       const gEl = b.closest('[data-gid]');
       if (act === 'add-ag') {
-        const g = { id: E.nid('g'), name: 'New ad group', campaignId: cEl.dataset.cid, keywords: [], negatives: [], headlines: ['', '', ''], descriptions: ['', ''], finalUrl: '', path1: 'New', path2: 'Ad-Group', maxCpc: null, _autoPaths: true };
+        const g = { id: E.nid('g'), name: 'New ad group', campaignId: cEl.dataset.cid, keywords: [], negatives: [], headlines: ['', '', ''], descriptions: ['', ''], finalUrl: '', path1: 'New', path2: 'Ad-Group', maxCpc: null, pins: {}, _autoPaths: true };
         const last = state.model.adGroups.map(x => x.campaignId).lastIndexOf(g.campaignId);
         state.model.adGroups.splice(last + 1, 0, g);
         state.open.add(g.id); state.dirty = true; renderTree(); refresh();
@@ -623,6 +682,7 @@
       }
       if (act === 'del-h' || act === 'del-d') {
         const list = act === 'del-h' ? g.headlines : g.descriptions;
+        movePin(g, act === 'del-h' ? 'h' : 'd', list[+b.dataset.i], '');
         list.splice(+b.dataset.i, 1); state.dirty = true; rerenderAg(g); refresh();
       }
     });
@@ -697,7 +757,7 @@
     $('#dlBtn').setAttribute('aria-disabled', blocked ? 'true' : 'false');
     const miss = has ? E.missingLocations(m, S) : [];
     $('#missingBox').hidden = !miss.length;
-    $('#missingList').innerHTML = miss.map(x => '<li><b>' + esc(x.campaign) + '</b><span>' + esc(x.places.join('; ')) + '</span></li>').join('');
+    $('#missingList').innerHTML = miss.map(x => '<li><b>' + esc(x.campaign) + '</b>' + (x.places.length ? '<span>Target: ' + esc(x.places.join('; ')) + '</span>' : '') + (x.excluded.length ? '<span>Exclude: ' + esc(x.excluded.join('; ')) + '</span>' : '') + '</li>').join('');
     const t = getExport();
     $('#exportMeta').textContent = has ? t.rows.length + ' rows · ' + t.headers.length + ' columns · ' + fileName() : '';
     if ($('#previewBox').open) renderPreview();

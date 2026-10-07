@@ -230,7 +230,7 @@ test('export: places without an ID are left out and listed to add by hand; "All 
   const locations = [{ name: 'Round Rock, Texas, United States', id: '' }, { name: 'Canada', id: '2124' }];
   const t = E.exportRows(doc(), settings({ locations }));
   assert.deepEqual(records(t).filter(r => r.Type === 'Campaign Location Criterion').map(r => r.Target), ['32']);
-  assert.deepEqual(E.missingLocations(doc(), settings({ locations })), [{ campaign: 'Search campaign', places: ['Round Rock, Texas, United States'] }]);
+  assert.deepEqual(E.missingLocations(doc(), settings({ locations })), [{ campaign: 'Search campaign', places: ['Round Rock, Texas, United States'], excluded: [] }]);
   const all = E.exportRows(doc(), settings({ locations: [], allLocations: true }));
   assert.equal(records(all).filter(r => r.Type === 'Campaign Location Criterion').length, 0);
 });

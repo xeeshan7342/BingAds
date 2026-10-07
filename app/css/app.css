@@ -196,7 +196,9 @@ details.ag[open] > summary .caret { transform: rotate(45deg); }
 .kw-area { min-height: 260px; font: 13px/1.6 var(--f-mono); }
 .neg-area { min-height: 70px; font: 13px/1.6 var(--f-mono); }
 .copy-list { display: flex; flex-direction: column; gap: 5px; }
-.copy-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 52px 26px; gap: 6px; align-items: center; }
+.copy-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 58px 52px 26px; gap: 6px; align-items: center; }
+.copy-row .pin { min-height: 32px; padding: 4px 4px; font-size: 12px; }
+.copy-row .pin.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .copy-row .ix { font-size: 11px; color: var(--ink-3); text-align: right; }
 .copy-row input, .copy-row textarea { min-height: 32px; padding: 5px 8px; }
 .copy-row textarea { min-height: 52px; resize: none; font-size: 13.5px; }
@@ -301,3 +303,4 @@ details.panel:not([open]) { gap: 0; }
 .missing-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
 .missing-list b { display: block; font-weight: 600; }
 .missing-list span { color: var(--ink-2); overflow-wrap: anywhere; }
+.chip.ex { background: var(--err-soft); }

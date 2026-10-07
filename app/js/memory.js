@@ -11,7 +11,7 @@
     keywords: 'Keywords section', negatives: 'Negative keywords section', headlines: 'Headlines section', descriptions: 'Descriptions section',
     adcopy: 'Mixed ad text section', settings: 'Settings section', other: 'Section to skip', adgroup: 'Ad group name', campaign: 'Campaign name', ignore: 'Line to ignore'
   };
-  const PROFILE_FIELDS = ['finalUrl', 'matchType', 'bidStrategy', 'targetCpa', 'maxCpc', 'bidCap', 'locations', 'allLocations', 'presenceOnly', 'languages', 'searchPartners', 'campaignStatus', 'timeZone'];
+  const PROFILE_FIELDS = ['finalUrl', 'finalUrlSuffix', 'matchType', 'bidStrategy', 'targetCpa', 'maxCpc', 'bidCap', 'locations', 'excludedLocations', 'allLocations', 'presenceOnly', 'languages', 'searchPartners', 'adRotation', 'campaignStatus', 'timeZone'];
   const ID_RX = /^\d{1,10}$/;
 
   const empty = () => ({ version: 1, labels: {}, profiles: {}, locIds: {} });
@@ -150,7 +150,11 @@
       // a Google Ads profile's Manual CPC runs as Enhanced CPC on Microsoft Search
       if (['maxclicks', 'maxconv', 'tcpa', 'ecpc', 'manual'].includes(src.bidStrategy)) s.bidStrategy = src.bidStrategy === 'manual' ? 'ecpc' : src.bidStrategy;
       ['targetCpa', 'maxCpc', 'bidCap'].forEach(f => { if (src[f] != null && src[f] !== '' && isFinite(+src[f])) s[f] = String(src[f]); });
-      if (Array.isArray(src.locations)) s.locations = src.locations.filter(l => l && typeof l.name === 'string').map(l => Object.assign({ name: l.name.slice(0, 200), id: ID_RX.test(String(l.id || '')) ? String(l.id) : '' }, ID_RX.test(String(l.msId || '')) ? { msId: String(l.msId) } : {}));
+      const places = list => list.filter(l => l && typeof l.name === 'string').map(l => Object.assign({ name: l.name.slice(0, 200), id: ID_RX.test(String(l.id || '')) ? String(l.id) : '' }, ID_RX.test(String(l.msId || '')) ? { msId: String(l.msId) } : {}));
+      if (Array.isArray(src.locations)) s.locations = places(src.locations);
+      if (Array.isArray(src.excludedLocations)) s.excludedLocations = places(src.excludedLocations);
+      if (typeof src.finalUrlSuffix === 'string' && src.finalUrlSuffix) s.finalUrlSuffix = src.finalUrlSuffix.slice(0, 2000);
+      if (['OptimizeForClicks', 'RotateAdsEvenly'].includes(src.adRotation)) s.adRotation = src.adRotation;
       if (Array.isArray(src.languages)) s.languages = src.languages.filter(c => typeof c === 'string' && Object.prototype.hasOwnProperty.call(E.MS_LANGS, c));
       if (typeof src.timeZone === 'string' && E.TIME_ZONES.some(z => z[0] === src.timeZone)) s.timeZone = src.timeZone;
       ['allLocations', 'presenceOnly', 'searchPartners'].forEach(f => { if (typeof src[f] === 'boolean') s[f] = src[f]; });

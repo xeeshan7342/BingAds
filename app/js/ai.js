@@ -25,6 +25,7 @@
         negative_keywords: { type: 'array', items: { $ref: '#/$defs/keyword' } },
         headlines: strArr,
         descriptions: strArr,
+        pins: { type: 'array', items: obj({ text: str, position: { type: 'integer', enum: [1, 2, 3] } }) },
         final_url: str,
         path1: str,
         path2: str
@@ -57,7 +58,10 @@
         presence_only: { type: 'string', enum: ['yes', 'no', 'not_stated'] },
         languages: strArr,
         search_partners: { type: 'string', enum: ['yes', 'no', 'not_stated'] },
-        start_date: str
+        start_date: str,
+        excluded_locations: strArr,
+        final_url_suffix: str,
+        ad_rotation: { type: 'string', enum: ['optimize_for_clicks', 'rotate_evenly', 'not_stated'] }
       }),
       unused_text: { type: 'array', items: obj({ text: str, reason: str }) }
     },
@@ -71,7 +75,9 @@
     'Copy keywords, headlines and descriptions exactly as written. Never rewrite, shorten, translate, merge or invent ad text, even when it is over Microsoft\'s character limits; the app checks limits itself. Only remove list numbering, character counts and pin notes.',
     'Match types: [keyword] is exact, "keyword" is phrase, +keyword or a stated "broad" is broad, anything else is default. A keyword written with a leading minus is a negative keyword.',
     'Budgets: give the amount and the period the document states. Use not_stated when it does not say daily, weekly or monthly.',
-    'Locations: one item per target exactly as written, for example "Austin, TX" or "United Kingdom". Put a campaign\'s own locations on that campaign and account-wide ones in settings.',
+    'Locations: one item per target exactly as written, for example "Austin, TX" or "United Kingdom". Put a campaign\'s own locations on that campaign and account-wide ones in settings. Places the document says to exclude go in settings.excluded_locations.',
+    'Pins: when the document pins a headline or description to a position, keep the text in headlines or descriptions and also list it in that ad group\'s pins with the position.',
+    'When the document gives one ad for an ad group that runs in several campaigns, repeat the ad under each of those campaigns\' ad groups.',
     'Bidding: give the strategy the campaign starts on, not one the document plans to switch to later. Manual CPC and enhanced CPC are both enhanced_cpc. Put a campaign\'s own bidding on that campaign and account-wide bidding in settings.',
     'Read Search content for Microsoft Advertising or Bing. Google Ads Search content counts too, because the same campaigns are often run on both, unless the document has a separate Microsoft Advertising section: then leave the Google Ads version out. Leave out Meta, Facebook, Instagram, LinkedIn, TikTok, Display, Shopping, Performance Max and audience campaigns, and list each such section once in unused_text.',
     'When the document does not state something, use an empty string, an empty list, null or not_stated. Do not guess a final URL.',
@@ -161,13 +167,14 @@
       name: '', budget_amount: null, budget_period: 'daily | monthly | weekly | not_stated', locations: [], final_url: '',
       bid_strategy: 'maximize_clicks | maximize_conversions | target_cpa | enhanced_cpc | not_stated', target_cpa: null,
       negative_keywords: [{ text: '', match_type: 'exact | phrase | broad | default' }],
-      ad_groups: [{ name: '', keywords: [{ text: '', match_type: 'exact | phrase | broad | default' }], negative_keywords: [], headlines: [], descriptions: [], final_url: '', path1: '', path2: '' }]
+      ad_groups: [{ name: '', keywords: [{ text: '', match_type: 'exact | phrase | broad | default' }], negative_keywords: [], headlines: [], descriptions: [], pins: [{ text: '', position: 1 }], final_url: '', path1: '', path2: '' }]
     }],
     account_negative_keywords: [],
     settings: {
       final_url: '', bid_strategy: 'maximize_clicks | maximize_conversions | target_cpa | enhanced_cpc | not_stated', target_cpa: null, max_cpc: null,
       default_match_type: 'phrase | exact | broad | phrase_and_exact | not_stated', locations: [], presence_only: 'yes | no | not_stated',
-      languages: [], search_partners: 'yes | no | not_stated', start_date: ''
+      languages: [], search_partners: 'yes | no | not_stated', start_date: '',
+      excluded_locations: [], final_url_suffix: '', ad_rotation: 'optimize_for_clicks | rotate_evenly | not_stated'
     },
     unused_text: [{ text: '', reason: '' }]
   };
@@ -246,7 +253,9 @@
       const cb = BIDS[c.bid_strategy];
       if (cb) res.campaignBids[k] = { bid: cb, targetCpa: +c.target_cpa > 0 ? +c.target_cpa : null };
       (c.ad_groups || []).forEach(a => {
-        res.adGroups.push({
+        const pins = {};
+        (a.pins || []).forEach(p => { const t = E.norm(p && p.text); if (t && [1, 2, 3].includes(+p.position)) pins[E.pinKey((a.headlines || []).map(E.norm).includes(t) ? 'h' : 'd', t)] = +p.position; });
+        res.adGroups.push({ pins,
           name: E.norm(a.name) || 'Ad group ' + (res.adGroups.length + 1), campHint: name,
           keywords: kws(a.keywords), negatives: kws(a.negative_keywords),
           headlines: (a.headlines || []).map(E.norm).filter(Boolean), descriptions: (a.descriptions || []).map(E.norm).filter(Boolean),
@@ -279,6 +288,13 @@
       const sd = E.settingFrom('Start date', s.start_date);
       if (sd && sd.v) res.settings.startDate = sd.v;
     }
+    if ((s.excluded_locations || []).length) {
+      const ex = E.settingFrom('Excluded locations', s.excluded_locations.join('; '));
+      if (ex) res.settings.excludedLocations = ex.v;
+    }
+    if (E.norm(s.final_url_suffix)) { const sfx = E.settingFrom('Final URL suffix', s.final_url_suffix); if (sfx) res.settings.finalUrlSuffix = sfx.v; }
+    const rot = { optimize_for_clicks: 'OptimizeForClicks', rotate_evenly: 'RotateAdsEvenly' }[s.ad_rotation];
+    if (rot) res.settings.adRotation = rot;
     (d.unused_text || []).forEach(u => { if (E.norm(u.text)) res.skipped.push({ text: E.norm(u.text), reason: E.norm(u.reason) || 'not placed by the AI', kind: 'ai' }); });
     return res;
   }

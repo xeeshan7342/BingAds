@@ -29,7 +29,7 @@ Microsoft and Bing sections are this tool's platform. Google Ads sections are re
 | Area | What the tool does for Microsoft Advertising |
 |---|---|
 | File | A bulk file in Microsoft's format version 6.0: a `Format Version` row, then campaigns, location targets, negatives, ad groups, keywords and responsive search ads, each parent before its children |
-| Time zone | Required on every new campaign. The tool picks one when every location shares a zone (Texas, Dubai, the UK), and asks you otherwise |
+| Time zone | Required on every new campaign. The tool picks one when every location shares a zone (Texas, Dubai, the UK), or else from a budget currency used in one country (INR, AED, GBP), and says which it used; otherwise it asks |
 | Bidding | Maximize clicks, Maximize conversions, Target CPA and Enhanced CPC. Microsoft Search campaigns have no manual CPC, so a doc that asks for it gets Enhanced CPC with its bids as the starting point. A CPC cap in the doc becomes the Max CPC limit |
 | Languages | Microsoft's ad languages only (English, French, German, Spanish, Portuguese, Italian, Dutch, the Nordic and EU languages, and Traditional Chinese). Others, such as Arabic or Hindi, are left out with a note; with none left the campaign targets all languages |
 | Negatives | Microsoft negatives are Exact or Phrase, so broad negatives go in as Phrase |
@@ -42,15 +42,17 @@ Microsoft and Bing sections are this tool's platform. Google Ads sections are re
 | Final URL suffix | Read from the doc or typed in, and written on each campaign |
 | Ad rotation | "Optimize for clicks" or "Rotate evenly", written on each ad group |
 | Location option | "People in your targeted locations" means presence only; wording about searching for or viewing pages turns it off |
-| Locations | Need Microsoft's own location IDs, covered below |
+| Locations | Need Microsoft's own location IDs; the tool ships them for countries, states and many cities, covered below |
 
 ## Microsoft location IDs
 
-This is the one part that works differently from Google. Microsoft's bulk file targets a place only by Microsoft's location ID. It does not take Google's IDs and it does not match places by name.
+This is the one part that works differently from Google. Microsoft's bulk file targets a place only by Microsoft's own location ID. It does not take Google's IDs and it does not match places by name.
 
-The tool ships the two IDs Microsoft publishes in its own documentation: the United States (190) and Canada (32). For every other place it uses an ID you give it, and it never guesses one, because a wrong ID would spend money in the wrong place.
+The tool ships Microsoft's IDs in `app/js/ms-geo.js`: every country Microsoft targets, the states and provinces of 19 countries (including the US, Canada, the UK, Australia, India and Germany), and about 28,600 cities in the US, Canada, the UK, Australia, Germany and France. They come from a copy of Microsoft's geographical locations file dated September 2020. Country IDs are tied to Google's through that file's own AdWords Location Id column, and the build checks the United States (190) and Canada (32) against Microsoft's documentation. A name that fits more than one place, such as a bare "Springfield", gets no ID rather than a guess.
 
-There are two ways to give IDs. Type the ID next to the place under **Locations**, and the tool remembers it for every doc after that. Or load Microsoft's geographical locations file with **Load Microsoft location file**. The tool then fills in every place it can match, countries by their Google ID and the rest by name, and remembers those too. Developers with Microsoft Advertising API access can download that file through the `GetGeoLocationsFileUrl` operation; ask whoever manages your API access if you don't have it.
+Places the list doesn't have (cities in the UAE or Pakistan, for example) need an ID from you. Type it next to the place under **Locations** and the tool remembers it for every doc after that. A typed ID always wins over the shipped one.
+
+The 2020 list can be out of date for a few places. If Microsoft rejects a location row on import, or you want the current IDs, load Microsoft's current geographical locations file with **Load Microsoft location file**: its IDs replace the 2020 ones for every place it matches. Developers with Microsoft Advertising API access can download that file through the `GetGeoLocationsFileUrl` operation, and `node scripts/build-geo.js <file> "<label>"` rebuilds the shipped table from it.
 
 Places that still have no ID are left out of the file and listed under **Add these places by hand**, so you can add them in Editor after import. A campaign whose places all lack an ID would show ads in every country, so the tool warns when it is imported paused and blocks the export when it would be imported enabled.
 
@@ -94,6 +96,7 @@ The app is plain JavaScript with no build step. Files in `app/js`:
 | File | What it does |
 |---|---|
 | `engine.js` | Reads blocks (headings, paragraphs, lists, tables) into campaigns and ad groups, checks them against Microsoft's rules, and writes bulk rows. Also holds the time zones, languages and location ID lookup. Runs in Node for the tests. |
+| `ms-geo.js` | Microsoft location IDs for countries, regions and cities, generated by `scripts/build-geo.js`. |
 | `readers.js` | Turns .docx, .xlsx, CSV and text files into blocks. |
 | `memory.js` | Taught labels, client profiles and Microsoft location IDs, stored in the browser, with export and import. |
 | `ai.js` | The optional Claude reader: request, schema, error messages and conversion to the engine's format. |

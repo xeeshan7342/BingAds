@@ -178,7 +178,8 @@
   // a location chip shows its Microsoft location ID, or that it still needs one
   const locChip = (l, removeIx, attr) => {
     const id = E.msLocationId(l, idsS());
-    return '<span class="chip' + (id ? '' : ' need') + (attr === 'ex' ? ' ex' : '') + '">' + esc(l.name) + (id ? ' <span class="mono" title="Microsoft location ID">' + esc(id) + '</span>' : ' <span class="mono" title="No Microsoft location ID yet">needs ID</span>')
+    const src = { typed: 'Microsoft location ID you gave', docs: 'Microsoft location ID from Microsoft\'s documentation', table: 'Microsoft location ID from Microsoft\'s 2020 location list' }[E.locationIdSource(l, idsS())] || 'Microsoft location ID';
+    return '<span class="chip' + (id ? '' : ' need') + (attr === 'ex' ? ' ex' : '') + '">' + esc(l.name) + (id ? ' <span class="mono" title="' + src + '">' + esc(id) + '</span>' : ' <span class="mono" title="No Microsoft location ID yet">needs ID</span>')
       + (removeIx != null ? '<button type="button" data-' + (attr || 'loc') + '="' + removeIx + '" aria-label="Remove ' + esc(l.name) + '">&times;</button>' : '') + '</span>';
   };
   // every place the export would target: the account defaults and each campaign's own
@@ -207,7 +208,7 @@
   }
   function syncTzHint() {
     $('#tzHint').textContent = state.tzGuessed && S.timeZone
-      ? 'Picked from the locations. Change it if the account runs on another zone; it cannot change once a campaign has run.'
+      ? (state.tzGuessed === 'places' ? 'Picked from the locations.' : 'Picked from the ' + state.tzGuessed + ' budgets, since the places span several zones.') + ' Change it if the account runs on another zone; it cannot change once a campaign has run.'
       : 'Microsoft needs one for every new campaign. It sets when budgets reset and start dates begin.';
   }
   function renderLangs() {
@@ -250,8 +251,12 @@
     // a time zone from the places, when they all share one and none is set yet
     state.tzGuessed = false;
     if (!S.timeZone) {
-      const tz = E.guessTimeZone(placesInUse());
-      if (tz) { S.timeZone = tz; state.tzGuessed = true; picked.push('time zone (from the locations)'); }
+      // from the places when they share one zone, otherwise from a budget currency used in one country (INR, AED, GBP)
+      const targets = placesInUse().filter(l => !(S.excludedLocations || []).includes(l) && !model.campaigns.some(c => (c.excluded || []).includes(l)));
+      const tz = E.guessTimeZone(targets);
+      const tzCur = !tz && d.currency ? E.zoneForCurrency(d.currency) : null;
+      if (tz) { S.timeZone = tz; state.tzGuessed = 'places'; picked.push('time zone (from the locations)'); }
+      else if (tzCur) { S.timeZone = tzCur; state.tzGuessed = d.currency; picked.push('time zone (from the ' + d.currency + ' budgets)'); }
     }
     return picked;
   }
@@ -1002,9 +1007,10 @@
     if (!state.geo) return { found: 0, left: 0 };
     let found = 0, left = 0;
     placesInUse().forEach(l => {
-      if (E.msLocationId(l, idsS())) return;
+      if (E.locationIdSource(l, idsS()) === 'typed') return;
       const id = E.geoLookup(state.geo, l);
-      if (id) { mem.teachLocation(l.name, id); found++; } else left++;
+      if (id) { if (id !== E.msLocationId(l, idsS())) mem.teachLocation(l.name, id); found++; }
+      else if (!E.msLocationId(l, idsS())) left++;
     });
     if (found) renderMemory();
     return { found, left };

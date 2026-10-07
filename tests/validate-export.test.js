@@ -98,11 +98,12 @@ test('a campaign whose places all lack an ID would serve everywhere: a warning w
 });
 
 test('several locations without an ID give one grouped warning', () => {
-  const list = ['Bloomingdale', 'Roselle', 'Wheaton', 'Lombard', 'Itasca', 'Addison'].map(n => ({ name: n + ', Illinois, United States', id: '' }));
+  // Pakistan has no cities in Microsoft's 2020 list, so none of these has an ID
+  const list = ['Karachi', 'Lahore', 'Islamabad', 'Rawalpindi', 'Faisalabad', 'Multan'].map(n => ({ name: n + ', Pakistan', id: '' }));
   const v = E.validate(doc(), settings({ locations: list }), TODAY);
   const w = msgs(v.warnings, /no Microsoft location ID \(/);
   assert.equal(w.length, 1);
-  assert.match(w[0].msg, /^6 locations have no Microsoft location ID \(Bloomingdale, Illinois, United States; .*; and 2 more\)/);
+  assert.match(w[0].msg, /^6 locations have no Microsoft location ID \(Karachi, Pakistan; .*; and 2 more\)/);
 });
 
 test('ad text policy checks: emoji, repeated punctuation, phone numbers, shouting, exclamation in a headline', () => {
@@ -227,10 +228,10 @@ test('export: campaign negatives, per-campaign locations, Enhanced CPC bids, bro
 });
 
 test('export: places without an ID are left out and listed to add by hand; "All countries" writes no location rows', () => {
-  const locations = [{ name: 'Round Rock, Texas, United States', id: '' }, { name: 'Canada', id: '2124' }];
+  const locations = [{ name: 'Sharjah, United Arab Emirates', id: '' }, { name: 'Canada', id: '2124' }];
   const t = E.exportRows(doc(), settings({ locations }));
   assert.deepEqual(records(t).filter(r => r.Type === 'Campaign Location Criterion').map(r => r.Target), ['32']);
-  assert.deepEqual(E.missingLocations(doc(), settings({ locations })), [{ campaign: 'Search campaign', places: ['Round Rock, Texas, United States'], excluded: [] }]);
+  assert.deepEqual(E.missingLocations(doc(), settings({ locations })), [{ campaign: 'Search campaign', places: ['Sharjah, United Arab Emirates'], excluded: [] }]);
   const all = E.exportRows(doc(), settings({ locations: [], allLocations: true }));
   assert.equal(records(all).filter(r => r.Type === 'Campaign Location Criterion').length, 0);
 });
@@ -272,7 +273,17 @@ test('time zone: one zone that fits every place, or none', () => {
 test('location IDs: Microsoft\'s documented country IDs, IDs a person gave, and nothing guessed', () => {
   assert.equal(E.msLocationId({ name: 'United States', id: '2840' }, {}), '190');
   assert.equal(E.msLocationId({ name: 'Canada', id: '2124' }, {}), '32');
-  assert.equal(E.msLocationId({ name: 'United Kingdom', id: '2826' }, {}), '');
+  // the shipped 2020 table: countries by Google ID, regions and cities by name; a typed ID wins
+  assert.equal(E.msLocationId({ name: 'United Kingdom', id: '2826' }, {}), '188');
+  assert.equal(E.locationIdSource({ name: 'United Kingdom', id: '2826' }, {}), 'table');
+  assert.equal(E.locationIdSource({ name: 'Canada', id: '2124' }, {}), 'docs');
+  assert.equal(E.msLocationId({ name: 'Nigeria', id: '2566' }, {}), '137');
+  assert.equal(E.msLocationId({ name: 'Austin, Texas, United States', id: '' }, {}), '66021');
+  assert.equal(E.msLocationId({ name: 'Texas, United States', id: '' }, {}), '4126');
+  assert.equal(E.msLocationId({ name: 'London, United Kingdom', id: '' }, {}), '41471');
+  assert.equal(E.msLocationId({ name: 'Bavaria, Germany', id: '' }, {}), '1405');
+  assert.equal(E.msLocationId({ name: 'Springfield', id: '' }, {}), '', 'many Springfields: no guess');
+  assert.equal(E.msLocationId({ name: 'Dubai, United Arab Emirates', id: '' }, {}), '', 'not in the 2020 list');
   assert.equal(E.msLocationId({ name: 'United Kingdom', id: '2826' }, { locIds: { 'united kingdom': '777' } }), '777');
   assert.equal(E.msLocationId({ name: 'Austin, Texas, United States', id: '' }, { locIds: { [E.locKey('austin,  TEXAS, United States')]: '88' } }), '88');
 });
@@ -303,4 +314,15 @@ test('the Microsoft geographical locations file fills in IDs, by Google ID for c
   assert.equal(E.geoLookup(ix, { name: 'Springfield', id: '' }), '', 'two Springfields: no guess');
   assert.equal(E.geoLookup(ix, { name: 'Paris, France', id: '' }), '');
   assert.throws(() => E.geoIndex('Campaign,Ad Group\nA,B'), /not Microsoft's geographical locations file/);
+});
+
+test('time zone fallback: a budget currency used in one country points to its zone', () => {
+  assert.equal(E.currencyOf('Daily budget (INR)'), 'INR');
+  assert.equal(E.currencyOf('₹500 per day'), 'INR');
+  assert.equal(E.currencyOf('AED 1,200'), 'AED');
+  assert.equal(E.currencyOf('$500'), null, 'dollars are used in many countries');
+  assert.equal(E.zoneForCurrency('INR'), 'ChennaiKolkataMumbaiNewDelhi');
+  assert.equal(E.zoneForCurrency('EUR'), null);
+  const m = parseText('Campaign 1: A\nDaily budget: ₹500\nAd Group 1: X\nKeywords\n- a b');
+  assert.equal(m.detected.currency, 'INR');
 });

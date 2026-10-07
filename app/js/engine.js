@@ -876,7 +876,21 @@
   }
   const money = s => { const a = findAmount(s); return a ? a.n : null; };
 
-  // "$1,500/month", "50 per day", "Monthly budget: 1500 (about 49/day)" -> { daily, basis, amount }
+  // the currency a budget is written in, when it names one that points to a single home market
+  const currencyOf = t => {
+    const s = String(t || '');
+    if (/₹|\binr\b|\brs\.?\s*\d|\brupees?\b/i.test(s)) return 'INR';
+    if (/\bpkr\b/i.test(s)) return 'PKR';
+    if (/\baed\b|د\.إ/i.test(s)) return 'AED';
+    if (/\bsar\b|﷼/i.test(s)) return 'SAR';
+    if (/£|\bgbp\b/i.test(s)) return 'GBP';
+    if (/\bngn\b|₦/i.test(s)) return 'NGN';
+    if (/\bkes\b|\bksh\b/i.test(s)) return 'KES';
+    if (/\bzar\b/i.test(s)) return 'ZAR';
+    if (/\bsgd\b|s\$/i.test(s)) return 'SGD';
+    return null;
+  };
+  // "$1,500/month", "50 per day", "Monthly budget: 1500 (about 49/day)" -> { daily, basis, amount, currency }
   function parseBudget(label, value) {
     // "£1,500 pcm", "£900 p/m", "₹2,00,000 p.m." are monthly
     const t = asciiDigits(value)
@@ -912,7 +926,7 @@
       if (units.length === 1) basis = unitOf(units[0].replace(/^(?:\/\s*|per\s+|a\s+|an\s+|each\s+|every\s+|por\s+|al\s+|par\s+|pro\s+)/i, ''));
     }
     const div = { daily: 1, monthly: 30.4, weekly: 7, yearly: 365 }[basis || 'daily'];
-    return { daily: Math.round((amount / div) * 100) / 100, basis: basis || 'unlabeled', amount };
+    return { daily: Math.round((amount / div) * 100) / 100, basis: basis || 'unlabeled', amount, currency: currencyOf(String(label || '') + ' ' + value) };
   }
 
   const BID_NAMES = { maxclicks: 'Maximize clicks', maxconv: 'Maximize conversions', tcpa: 'Target CPA', ecpc: 'Enhanced CPC' };
@@ -2579,6 +2593,9 @@
       if (model.campaigns.length === 1 && free.length === 1) { free[0].budget = res.globalBudget.daily; free[0].budgetBasis = res.globalBudget.basis; budgetNote(free[0], res.globalBudget); }
       else if (free.length) model.notes.push({ level: 'info', msg: 'Doc mentions a budget of ' + fmtNum(res.globalBudget.amount) + (res.globalBudget.basis !== 'unlabeled' ? ' (' + res.globalBudget.basis + ')' : '') + '. Set the daily budget for each campaign below.' });
     }
+    const budgets = Object.keys(res.campaignBudgets).map(k => res.campaignBudgets[k]).concat(res.globalBudget ? [res.globalBudget] : []);
+    const cur = (budgets.find(b => b && b.currency) || {}).currency;
+    if (cur) model.detected.currency = cur;
     res.skipped.forEach(s => model.skipped.push({ text: s.text, reason: s.reason, kind: s.kind || 'item', suggest: s.suggest || null, agId: s.ag ? agIds.get(s.ag) || null : null, section: s.section || null }));
     return model;
   }
@@ -2729,6 +2746,10 @@
     if (/^(?:United States|Canada|Australia)$/.test(country)) return parts.length >= 2 ? zoneOfRegion(parts[parts.length - 2]) : null;
     return TZ_COUNTRY[country] || null;
   }
+  // the home time zone of a currency that is used in one country
+  const CURRENCY_TZ = { INR: 'ChennaiKolkataMumbaiNewDelhi', PKR: 'IslandamabadKarachiTashkent', AED: 'AbuDhabiMuscat', SAR: 'KuwaitRiyadh',
+    GBP: 'GreenwichMeanTimeDublinEdinburghLisbonLondon', NGN: 'WestCentralAfrica', KES: 'Nairobi', ZAR: 'HararePretoria', SGD: 'KualaLumpurSingapore' };
+  const zoneForCurrency = c => CURRENCY_TZ[c] || null;
   // One time zone that fits every location, or null when they span several or the tool cannot tell
   function guessTimeZone(locs) {
     const zones = new Set();
@@ -2743,10 +2764,19 @@
   };
 
   /* Location IDs. Microsoft's bulk file targets a place only by Microsoft's own location ID, which is not Google's ID and
-     cannot be matched by name. The tool knows the two IDs Microsoft publishes in its documentation; the rest come from
-     Microsoft's geographical locations file loaded in the app, or from IDs a person typed in (both kept in memory). */
+     cannot be matched by name. In order: an ID a person typed in or that came from a loaded locations file (both kept in
+     memory), the two IDs Microsoft publishes in its documentation, then the table shipped in ms-geo.js (countries, regions
+     and cities from Microsoft's 2020 locations file). */
   const MS_COUNTRY_IDS = { '2840': '190', '2124': '32' };  // United States, Canada (Google country ID -> Microsoft location ID)
   const locKey = s => plainKey(s);
+  let builtinGeo;
+  const builtinIndex = () => {
+    if (builtinGeo !== undefined) return builtinGeo;
+    let d = root.MSGeoData || null;
+    if (!d && typeof require === 'function') { try { d = require('./ms-geo.js'); } catch (e) { d = null; } }
+    builtinGeo = d ? geoIndexFromData(d) : null;
+    return builtinGeo;
+  };
   function msLocationId(loc, S) {
     if (!loc) return '';
     if (/^\d{1,10}$/.test(String(loc.msId || ''))) return String(loc.msId);
@@ -2755,7 +2785,31 @@
     if (k && ids[k]) return String(ids[k]);
     if (loc.id && MS_COUNTRY_IDS[loc.id]) return MS_COUNTRY_IDS[loc.id];
     if (loc.id && ids['g' + loc.id]) return String(ids['g' + loc.id]);
-    return '';
+    const b = builtinIndex();
+    return b ? geoLookup(b, loc) : '';
+  }
+  // the shipped table -> the index a loaded file makes
+  function geoIndexFromData(d) {
+    const byGid = new Map(), byFirst = new Map(), countryName = new Map();
+    String(d.countries || '').split(',').forEach(p => { const [g, id] = p.split(':'); if (g && id) byGid.set(g, id); });
+    const add = (parts, entry, type) => {
+      const i = entry.lastIndexOf(':');
+      const ps = [entry.slice(0, i)].concat(parts).map(plainKey);
+      const list = byFirst.get(ps[0]) || [];
+      list.push({ id: entry.slice(i + 1), parts: ps, type });
+      byFirst.set(ps[0], list);
+    };
+    Object.keys(d.regions || {}).forEach(c => String(d.regions[c]).split('|').forEach(e => add([c], e, 'state')));
+    Object.keys(d.cities || {}).forEach(c => Object.keys(d.cities[c]).forEach(r => String(d.cities[c][r]).split('|').forEach(e => add([r, c], e, 'city'))));
+    return { byGid, byFirst, countryName, count: byGid.size };
+  }
+  // where a place's ID comes from, for the page: "typed", "docs" or "table"
+  function locationIdSource(loc, S) {
+    if (!loc) return '';
+    const ids = (S && S.locIds) || {};
+    if (/^\d{1,10}$/.test(String(loc.msId || '')) || ids[locKey(loc.name)] || (loc.id && ids['g' + loc.id])) return 'typed';
+    if (loc.id && MS_COUNTRY_IDS[loc.id]) return 'docs';
+    return msLocationId(loc, S) ? 'table' : '';
   }
 
   // Microsoft's geographical locations file: Location Id, Bing Display Name ("Austin|Texas|United States"), Location Type,
@@ -3129,7 +3183,7 @@
     parseHTML, parseText, parseSheets, validate, exportRows, toCSV, suggestPaths, COUNTRIES, LANGS, MS_LANGS, findCountry, parseLocations,
     parseBudget, adLen, matchSetting, sectionLabel, kwToLine, linesToKw, matchTypesFor, negBlocks, negMatch, nid, parseKeyword, deriveName, blocksToText, tidyCampaign,
     settingFrom, TIME_ZONES, guessTimeZone, msLanguages, msLocationId, locKey, geoIndex, geoLookup, missingLocations, MS_COUNTRY_IDS, platformOf,
-    pinKey, pinPosition, inlinePin
+    pinKey, pinPosition, inlinePin, locationIdSource, zoneForCurrency, currencyOf
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CBEngine = api;

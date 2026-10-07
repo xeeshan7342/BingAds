@@ -156,19 +156,23 @@ test('the workbook exports with pins, exclusions, the URL suffix and ad rotation
   const v = E.validate(m, S, '2026-10-06');
   assert.deepEqual(v.errors, []);
   assert.equal(msgs(v.warnings, /compete for the same searches/).length, 0);
-  assert.equal(msgs(v.warnings, /Excluded place "Bolivia" has no Microsoft location ID/).length, 1);
+  assert.equal(msgs(v.warnings, /no Microsoft location ID/).length, 0, 'Bolivia comes from the shipped table, Peru from a typed ID');
   const t = E.exportRows(m, S);
   const rows = t.rows.map((r, i) => Object.fromEntries(t.headers.map((h, j) => [h, r[j]]).concat([['kind', t.kinds[i]]])));
   const north = rows.filter(r => r.Campaign === W), south = rows.filter(r => r.Campaign === S2);
   assert.deepEqual(north.filter(r => r.Type === 'Campaign Location Criterion').map(r => r.Target), ['32', '190']);
   assert.deepEqual(south.filter(r => r.Type === 'Campaign Location Criterion').map(r => r.Target), ['11', '12', '13']);
-  assert.deepEqual(south.filter(r => r.Type === 'Campaign Negative Location Criterion').map(r => r.Target), ['21']);
+  assert.deepEqual(south.filter(r => r.Type === 'Campaign Negative Location Criterion').map(r => r.Target), ['21', '17']);
   assert.equal(rows.find(r => r.Type === 'Campaign')['Final Url Suffix'], 'utm_source=bing&utm_medium=cpc&utm_campaign={CampaignId}');
   assert.equal(rows.find(r => r.Type === 'Ad Group')['Ad Rotation'], 'OptimizeForClicks');
   const ad = JSON.parse(south.find(r => r.Type === 'Responsive Search Ad').Headline);
   assert.deepEqual(ad.slice(0, 3), [{ text: 'Northwind Dental Clinic', pinnedField: 'Headline1' }, { text: 'Northwind: Care Abroad', pinnedField: 'Headline1' }, { text: 'Dental Implants Abroad' }]);
   assert.equal(JSON.parse(south.find(r => r.Type === 'Responsive Search Ad').Description)[0].pinnedField, 'Description1');
-  assert.deepEqual(E.missingLocations(m, S).map(x => [x.campaign, x.places, x.excluded]), [[W, [], ['Bolivia']], [S2, [], ['Bolivia']]]);
+  assert.deepEqual(E.missingLocations(m, S), []);
+  // an excluded place Microsoft's list does not have is listed to exclude by hand
+  const S3 = Object.assign({}, S, { excludedLocations: [{ name: 'Sharjah, United Arab Emirates', id: '' }] });
+  assert.equal(msgs(E.validate(m, S3, '2026-10-06').warnings, /Excluded place "Sharjah, United Arab Emirates" has no Microsoft location ID/).length, 1);
+  assert.deepEqual(E.missingLocations(m, S3).map(x => x.excluded), [['Sharjah, United Arab Emirates'], ['Sharjah, United Arab Emirates']]);
 });
 
 test('the same keyword still warns inside one campaign, or across campaigns that reach the same places', () => {

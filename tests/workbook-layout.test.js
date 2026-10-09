@@ -237,3 +237,36 @@ test('settings rows: presence wording, exclusions inside a locations value, suff
   const display = E.parseText('Campaign type: Display\nAd Group 1: A\nKeywords\n- a b');
   assert.ok(display.notes.some(n => /builds Search campaigns only/.test(n.msg)));
 });
+
+test('a fixes tab for another campaign and a "keywords to pause" list add no keywords', () => {
+  const C = 'NW | Clinic | Search | Global';
+  const fixBook = [
+    ['Keywords', [['Keywords'], ['Campaign', 'Ad Group', 'Keyword', 'Match Type'],
+      [C, 'Implants', 'dental implants abroad', 'Phrase'], [C, 'Implants', 'implant cost abroad', 'Exact'],
+      [], ['Keywords to pause (rarely served)'], ['Ad group', 'Keyword', 'Match type'], ['Implants', 'cheapest implants abroad', 'Exact']]],
+    ['Google Fixes', [['Google clinic campaign: fixes before it runs'], ['From the reports for last week.'], [],
+      ['Account and locations'], ['Priority', 'Area', 'Finding', 'Fix'], ['High', 'Locations', 'Spain is still targeted', 'Remove it.'], [],
+      ['Ad text replacements (all ads)'], ['Ad group', 'Asset', 'Current text', 'Issue', 'Replace with', 'Characters'], ['Implants', 'Headline 4', 'Best Implants', 'Superlative', 'Implants Abroad', '15'], [],
+      ['Keywords to pause (rarely served)'], ['Ad group', 'Keyword', 'Match type'], ['Implants', 'affordable implants abroad', 'Exact'], ['Braces', 'cheapest braces abroad', 'Exact']]]
+  ];
+  const fm = E.parseBlocksToModel(fixBook.flatMap(([name, rows]) => E.rowsToBlocks(rows, name)), 'Fixes.xlsx');
+  assert.deepEqual(fm.adGroups.map(g => [g.name, g.keywords.map(k => k.text)]), [['Implants', ['dental implants abroad', 'implant cost abroad']]]);
+  assert.ok(fm.skipped.some(s => /Keywords to pause/.test(s.reason)));
+  assert.ok(fm.skipped.some(s => /"Google Fixes" section/.test(s.reason)));
+  // an ad group whose name has "fixes" in it is still an ad group
+  const leak = E.parseText('Ad Group 1: Leak Fixes\nKeywords\n- leak fixes near me\nHeadlines\n- Fast Leak Fixes');
+  assert.deepEqual(leak.adGroups.map(g => [g.name, g.keywords.length, g.headlines.length]), [['Leak Fixes', 1, 1]]);
+});
+
+test('places grouped under labels are all read, and "As above" is not a place', () => {
+  const r = E.parseLocations('Africa: Cameroon, Ethiopia, Tanzania. Pacific: Fiji, Papua New Guinea, Tuvalu. Add Kenya if the location picker offers it.');
+  assert.deepEqual(r.list.map(l => l.name), ['Cameroon', 'Ethiopia', 'Tanzania', 'Fiji', 'Papua New Guinea', 'Tuvalu']);
+  assert.deepEqual(r.notes, ['Not used from the locations: "Add Kenya if the location picker offers it." Add those places by hand if you want them.']);
+  assert.deepEqual(E.parseLocations('Europe: France, Spain').list.map(l => l.name), ['France', 'Spain']);
+  // a label that is itself a place is left as it was
+  assert.deepEqual(E.parseLocations('Texas: Austin, Dallas').list.map(l => l.name).length > 0, true);
+  ['As above. Add each country individually.', 'Same as above', 'As per campaign table'].forEach(v => {
+    const a = E.parseLocations(v);
+    assert.deepEqual([a.list, a.perCampaign, a.notes], [[], true, []], v);
+  });
+});

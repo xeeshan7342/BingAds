@@ -270,6 +270,9 @@
     ['headlines', true, /^(?:(?:rsa|responsive search ads?|search ads?|ads?|ad copy|copy|suggested|recommended|final|proposed|core|pinned|optional|additional|extra|more|sample|example|google|microsoft|bing)\s+)*(?:headlines?|titles?|headline (?:options|variations|ideas|variants|copy|text))(?:\s+(?:options|variations|ideas|variants|copy|list|text))*$/],
     ['descriptions', true, /^(?:(?:rsa|responsive search ads?|search ads?|ads?|ad copy|copy|suggested|recommended|final|proposed|core|optional|additional|extra|more|sample|example|google|microsoft|bing)\s+)*(?:descriptions?|description lines?|descs?|body copy|body text|ad text|description (?:options|variations|ideas|variants|copy|text))(?:\s+(?:options|variations|ideas|variants|copy|list|text))*$/],
     ['adcopy', false, /^(?:(?:the|our|suggested|recommended|final|proposed|sample|example)\s+)*(?:rsas?|responsive search ads?|search ads?|ad copy|ads|ad|ad creatives?|creatives?|text ads?|ad variations?|ad texts?|ad copies)(?:\s+(?:copy|set|sets|variations?|options|version|versions|text|a|b|c))*$/],
+    // audits and fix lists for a running campaign: "Google Fixes", "Keywords to pause (rarely served)", "Ad text replacements".
+    // Their keywords and ad text describe changes to another campaign, not this build
+    ['other', true, /^(?:(?:google|google ads|adwords|microsoft|microsoft ads|microsoft advertising|bing|bing ads|ppc|sem|search|campaign|account)\s+)+(?:fixes|fix list|audit|audit findings|findings|changes)$|^(?:(?:account|campaign|ppc|search)\s+)?(?:audit findings|fix list|fixes before (?:launch|it runs|they run|going live)|changes to make|ad (?:text|copy) (?:replacements|changes|fixes)|replacements)$|^(?:(?:existing|current|old|live|google|microsoft|bing)\s+)*(?:key ?words?|ads?|ad groups?|campaigns?)\s+to\s+(?:pause|remove|delete|drop|turn off|switch off|stop)$|^(?:paused|rarely served|low (?:search )?volume|not eligible|low quality|underperforming)\s+(?:key ?words?|ads?)$/],
     // asset types are never keywords or ad text, so they end a list even as a plain line
     ['other', true, /^(?:(?:ad|campaign|account|recommended|suggested|optional|additional)\s+)*(?:level\s+)?(?:sitelinks?|site links?|sitelink (?:extensions?|assets?)|callouts?|callout (?:extensions?|assets?|text)|structured snippets?|ad (?:extensions?|assets)|image (?:extensions?|assets?)|call (?:extensions?|assets?)|promotion (?:extensions?|assets?)|price (?:extensions?|assets?)|lead form (?:extensions?|assets?)|location (?:extensions?|assets?)|app (?:extensions?|assets?))$/],
     ['other', false, /^(?:(?:ad|campaign|account|recommended|suggested|optional|additional|key|important|general|final|pro|quick|bonus|expert|extra|helpful|our|my)\s+)*(?:level\s+)?(?:sitelinks?|site links?|sitelink (?:extensions?|assets?)|callouts?|callout (?:extensions?|assets?|text)|structured snippets?|snippets?|extensions?|assets?|ad (?:extensions?|assets)|images?|image (?:extensions?|assets?)|logos?|business (?:name|logo)|call (?:extensions?|assets?)|phone (?:number|extensions?|assets?)|promotions?|promotion (?:extensions?|assets?)|price (?:extensions?|assets?)|prices|lead forms?|location (?:extensions?|assets?)|app (?:extensions?|assets?)|notes?|strategy|rationale|reasoning|why|tips?|recommendations?|next steps?|checklist|to ?do|todo|landing pages? (?:notes|recommendations|suggestions|requirements|tips)|audiences?|audience (?:targeting|signals|segments|lists)|demographics?|ad schedul(?:e|ing)|schedul(?:e|ing)|day ?parting|conversion (?:tracking|actions?|goals?|setup)|conversions|kpis?|goals?|objectives?|measurement|tracking|reporting|budget (?:plan|split|allocation|breakdown|notes|rationale)|bid (?:adjustments|modifiers)|devices?|device (?:targeting|bid adjustments)|overview|summary|scope|assumptions|compliance|policy(?: notes)?|before you launch|launch checklist|optimi[sz]ation(?: plan| tips)?|timeline|appendix|references?|faqs?|questions|contents|table of contents|introduction|background|competitors?|competitor analysis|keyword research|research|analysis|insights|structure|account structure|campaign structure|naming conventions?|glossary|dashboard|kpi dashboard|scorecard|cover|cover (?:sheet|page)|read ?me|instructions|how to use(?: this (?:file|sheet|workbook|doc))?|legend|change ?log|version history|revision history)$/],
@@ -714,6 +717,7 @@
 
   const AND_NAMES = /\b(?:trinidad and tobago|bosnia and herzegovina|antigua and barbuda|saint kitts and nevis|st\.? kitts and nevis|saint vincent and the grenadines|st\.? vincent and the grenadines|sao tome and principe|são tomé and príncipe|newfoundland and labrador|turks and caicos(?: islands)?|heard island and mcdonald islands|saint pierre and miquelon|wallis and futuna)\b/gi;
 
+  const SENTENCE_END = /\b(?!(?:ste|sta|sto|mte|mts|mtn|ave|blvd|hwy|dept|govt|est|inc|ltd|corp)\.)([\p{L}]{3,}|[A-Z]{2})\.\s+(?=\p{Lu})/u;
   function parseLocations(value) {
     let v = norm(value);
     const info = { presence: null, notes: [], excluded: '' };
@@ -721,10 +725,24 @@
     const ex = v.match(/[,;(]?\s*\b(?:excluding|exclude[sd]?|except|but not|not including|minus|without)\b\s*:?\s*([^)]*)\)?\s*$/i);
     if (ex) { info.excluded = norm(ex[1]); v = v.slice(0, ex.index); }
     // "Per campaign below." or "See the campaign table": the places are given elsewhere
-    if (/^(?:per campaign|by campaign|varies by campaign|see (?:below|above|the campaign|campaign|each campaign)|set per campaign|tbd|tbc|to be (?:confirmed|decided))\b/i.test(v)) return { list: [], presence: info.presence, notes: [], perCampaign: true };
+    if (/^(?:per campaign|by campaign|varies by campaign|see (?:below|above|the campaign|campaign|each campaign)|set per campaign|(?:same )?as (?:above|below|before|listed (?:above|below)|per (?:above|below|(?:the )?campaign(?: table)?))|tbd|tbc|to be (?:confirmed|decided))\b/i.test(v)) return { list: [], presence: info.presence, notes: [], perCampaign: true };
     // "Nigeria, Cameroon, The Gambia. Add Ghana and Liberia if offered.": the places end at the first full sentence
     v = v.replace(/\bD\.\s?C\.?(?=\s|,|;|$)/g, 'DC');
-    const sb = v.match(/\b(?!(?:ste|sta|sto|mte|mts|mtn|ave|blvd|hwy|dept|govt|est|inc|ltd|corp)\.)([\p{L}]{3,}|[A-Z]{2})\.\s+(?=\p{Lu})/u);
+    // "Africa: Cameroon, Ethiopia. Pacific: Fiji, Tuvalu.": places grouped under labels that are not places themselves;
+    // every labelled sentence counts, and the places end at the first sentence without a label
+    const sents = [];
+    for (let t = v, m; t; ) { m = t.match(SENTENCE_END); if (!m) { sents.push(t); break; } sents.push(t.slice(0, m.index + m[1].length)); t = t.slice(m.index + m[0].length); }
+    const grouped = x => {
+      const m = norm(x).match(/^([\p{L}][\p{L} &/-]{1,30}?)\s*:\s*(.+)$/u);
+      return m && !isKnownPlace(m[1]) && m[2].split(/\s*(?:,|;|&|\band\b)\s*/i).some(p => isKnownPlace(norm(p).replace(/\.+$/, ''))) ? norm(m[2]).replace(/\.+$/, '') : null;
+    };
+    if (sents.length && grouped(sents[0])) {
+      let k = 0;
+      const lists = [];
+      while (k < sents.length && grouped(sents[k])) lists.push(grouped(sents[k++]));
+      v = lists.join('; ') + (k < sents.length ? '. ' + sents.slice(k).join(' ') : '');
+    }
+    const sb = v.match(SENTENCE_END);
     if (sb) {
       const rest = norm(v.slice(sb.index + sb[0].length));
       if (/\p{L}/u.test(rest)) info.notes.push('Not used from the locations: "' + rest + '" Add those places by hand if you want them.');
